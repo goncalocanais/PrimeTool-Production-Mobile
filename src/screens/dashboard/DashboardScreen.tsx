@@ -64,7 +64,7 @@ const SIMPLE_BUTTONS: Record<UserRole, SimpleButton[]> = {
     {label: 'REGISTAR MONTAGEM',            route: '/assembly/registar',       Icon: PenLine},
   ],
   qualidade: [
-    {label: 'VERIFICAR ORDENS DE PRODUÇÃO', route: '/quality',                 Icon: ShieldCheck,   primary: true},
+    {label: 'VERIFICAR ORDENS DE PRODUÇÃO', route: '/(tabs)/orders',           Icon: ShieldCheck,   primary: true},
     {label: 'CONSULTAR VERIFICAÇÕES',       route: '/quality/verificacoes',    Icon: CheckSquare2},
   ],
   expedicao: [

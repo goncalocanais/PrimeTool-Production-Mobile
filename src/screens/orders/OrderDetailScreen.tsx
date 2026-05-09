@@ -4,7 +4,7 @@ import {
   Modal, TextInput,
 } from 'react-native';
 import {useRouter, useLocalSearchParams} from 'expo-router';
-import {Play, Pause, Square, Plus, Clock, Package, History} from 'lucide-react-native';
+import {Play, Pause, Square, Plus, Clock, Package, History, Info, ClipboardList, CheckCircle} from 'lucide-react-native';
 import {useAppSelector} from '../../store';
 import {AppHeader, BottomNavBar} from '../../components/common';
 import {Colors, Spacing, FontSize, BorderRadius} from '../../theme';
@@ -227,17 +227,21 @@ export const OrderDetailScreen: React.FC = () => {
 
         {/* Notificação */}
         {!!notification && (
-          <View style={styles.notifBox}>
-            <Text style={styles.notifText}>ℹ️  {notification}</Text>
+          <View style={[styles.notifBox, {flexDirection: 'row', alignItems: 'center', gap: 8}]}>
+            <Info size={14} color="#166534" />
+            <Text style={[styles.notifText, {flex: 1}]}>{notification}</Text>
           </View>
         )}
 
         {/* ── Info card ── */}
         <View style={styles.card}>
           <View style={[styles.cardHeader, {justifyContent: 'space-between'}]}>
-            <Text style={styles.cardHeaderTitle} numberOfLines={1}>
-              📋 {ordem.ref} — {ordem.nome.toUpperCase()}
-            </Text>
+            <View style={{flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6}}>
+              <ClipboardList size={14} color="rgba(255,255,255,0.75)" />
+              <Text style={styles.cardHeaderTitle} numberOfLines={1}>
+                {ordem.ref} — {ordem.nome.toUpperCase()}
+              </Text>
+            </View>
             <View style={[styles.badge, {backgroundColor: badge.bg}]}>
               <Text style={styles.badgeText}>{estado}</Text>
             </View>
@@ -266,7 +270,7 @@ export const OrderDetailScreen: React.FC = () => {
             <View style={styles.timerBody}>
               {estado === 'CONCLUÍDA' ? (
                 <View style={styles.timerRow}>
-                  <Text style={{fontSize: 20}}>✅</Text>
+                  <CheckCircle size={20} color="#16a34a" />
                   <Text style={styles.timerDoneText}>Produção concluída</Text>
                   <Text style={styles.timerValue}>{formatTime(timerSecs)}</Text>
                 </View>

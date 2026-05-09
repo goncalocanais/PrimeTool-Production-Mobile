@@ -234,7 +234,7 @@ export const LoginScreen: React.FC = () => {
         {/* Rodapé */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>PrimeTool Production v1.0.0</Text>
-          <Text style={styles.footerSub}>© 2025 PrimeTool · Todos os direitos reservados</Text>
+          <Text style={styles.footerSub}>© 2026 PrimeTool · Todos os direitos reservados</Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

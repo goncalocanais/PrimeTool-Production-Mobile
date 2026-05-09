@@ -40,27 +40,26 @@ function StatCard({
 
 const statStyles = StyleSheet.create({
   card: {
-    flex: 1,
+    width: '48%',
     borderWidth: 1.5,
     borderColor: Colors.border,
     borderRadius: BorderRadius.lg,
-    padding: 10,
+    padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
     backgroundColor: '#fff',
-    minWidth: 0,
   },
   iconBox: {
-    width: 32,
-    height: 32,
+    width: 36,
+    height: 36,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
-  value: {fontFamily: 'Exo2_700Bold', fontSize: 15, lineHeight: 18},
-  label: {fontSize: 9, color: Colors.gray600, marginTop: 1, fontFamily: 'Exo2_400Regular'},
+  value: {fontFamily: 'Exo2_700Bold', fontSize: 16, lineHeight: 20},
+  label: {fontSize: 10, color: Colors.gray600, marginTop: 2, fontFamily: 'Exo2_400Regular'},
 });
 
 /* ── Field ── */
@@ -257,6 +256,7 @@ const styles = StyleSheet.create({
 
   statsRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: Spacing.sm,
   },
 

@@ -120,7 +120,7 @@ export const CreateOrderScreen: React.FC = () => {
         {/* Form card */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>🔧 NOVA ORDEM DE PRODUÇÃO</Text>
+            <Text style={styles.cardTitle}>NOVA ORDEM DE PRODUÇÃO</Text>
           </View>
 
           {/* Referência + Prioridade */}
@@ -176,9 +176,6 @@ export const CreateOrderScreen: React.FC = () => {
                 <Text style={[styles.pickerBtnText, !cliente && {color: Colors.gray400}]}>
                   {cliente || 'Selecionar cliente'} ▾
                 </Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.novoBtn}>
-                <Text style={styles.novoBtnText}>+ Novo</Text>
               </TouchableOpacity>
             </View>
             {showClientePicker && (
@@ -283,13 +280,13 @@ const styles = StyleSheet.create({
   breadcrumb: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.primary,
+    backgroundColor: ORANGE,
     paddingHorizontal: Spacing.base,
-    paddingBottom: Spacing.sm,
+    paddingVertical: 7,
   },
-  breadcrumbText: {color: ORANGE, fontSize: FontSize.xs, fontWeight: FontWeight.semibold as any},
-  breadcrumbSep: {color: Colors.white, fontSize: FontSize.xs},
-  breadcrumbCurrent: {color: Colors.white, fontSize: FontSize.xs, fontWeight: FontWeight.semibold as any},
+  breadcrumbText: {color: '#fff', fontSize: FontSize.xs, fontFamily: 'Exo2_700Bold', letterSpacing: 1, opacity: 0.85},
+  breadcrumbSep: {color: 'rgba(255,255,255,0.6)', fontSize: FontSize.xs, marginHorizontal: 4},
+  breadcrumbCurrent: {color: '#fff', fontSize: FontSize.xs, fontFamily: 'Exo2_700Bold', letterSpacing: 1},
 
   // Scroll
   scroll: {flex: 1},
@@ -375,16 +372,6 @@ const styles = StyleSheet.create({
   },
   pickerMenuItem: {paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm},
   pickerMenuText: {fontSize: FontSize.sm, color: Colors.gray700},
-
-  // Novo cliente
-  novoBtn: {
-    backgroundColor: Colors.primaryLight,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    justifyContent: 'center',
-  },
-  novoBtnText: {color: Colors.white, fontSize: FontSize.sm, fontWeight: FontWeight.semibold as any},
 
   // Materiais
   addMaterialBtn: {
