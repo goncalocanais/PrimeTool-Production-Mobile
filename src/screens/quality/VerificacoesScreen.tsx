@@ -1,54 +1,44 @@
-import React, {useState} from 'react';
-import {View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput} from 'react-native';
+import React, {useState, useEffect, useCallback} from 'react';
+import {View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, RefreshControl, ActivityIndicator} from 'react-native';
 import {useRouter} from 'expo-router';
 import {Search, ChevronDown, Plus, X} from 'lucide-react-native';
 import {useAppSelector} from '../../store';
 import {AppHeader, BottomNavBar} from '../../components/common';
 import {Colors, Spacing, FontSize, BorderRadius} from '../../theme';
+import {qualityApi} from '../../api/quality';
+import {InspeccaoQualidade} from '../../types';
+import {supabase} from '../../lib/supabase';
 
 const NAVY   = Colors.primary;
 const ORANGE = Colors.warning;
 const GREEN  = Colors.success;
 
-type ResultadoType = 'Aprovado' | 'Reprovado' | 'Com Ressalvas';
-
-const RESULTADO_STYLES: Record<ResultadoType, {bg: string}> = {
-  'Aprovado':      {bg: GREEN},
-  'Reprovado':     {bg: Colors.danger},
-  'Com Ressalvas': {bg: ORANGE},
+const RESULTADO_LABEL: Record<string, string> = {
+  aprovado:               'Aprovado',
+  reprovado:              'Reprovado',
+  aprovado_com_ressalvas: 'Com Ressalvas',
 };
 
-interface Verificacao {
-  id: string;
-  ref: string;
-  ordemRef: string;
-  tipo: string;
-  inspector: string;
-  data: string;
-  resultado: ResultadoType;
-  observacoes: string;
-}
-
-const MOCK: Verificacao[] = [
-  {id: '1', ref: 'INS-2026-001', ordemRef: '2026-0001', tipo: 'Inspeção Final',     inspector: 'Ana Ferreira',   data: '2026-04-02', resultado: 'Aprovado',      observacoes: 'Sem anomalias detectadas.'},
-  {id: '2', ref: 'INS-2026-002', ordemRef: '2026-0003', tipo: 'Inspeção Intermédia',inspector: 'Miguel Santos',  data: '2026-03-28', resultado: 'Com Ressalvas', observacoes: 'Pintura com ligeiras imperfeições.'},
-  {id: '3', ref: 'INS-2026-003', ordemRef: '2026-0004', tipo: 'Inspeção Final',     inspector: 'Carla Moura',    data: '2026-03-30', resultado: 'Aprovado',      observacoes: 'Conforme especificações.'},
-  {id: '4', ref: 'INS-2026-004', ordemRef: '2026-0002', tipo: 'Inspeção Intermédia',inspector: 'Ana Ferreira',   data: '2026-03-15', resultado: 'Reprovado',     observacoes: 'Estrutura fora de tolerância.'},
-  {id: '5', ref: 'INS-2026-005', ordemRef: '2026-0005', tipo: 'Inspeção Final',     inspector: 'Miguel Santos',  data: '2026-04-05', resultado: 'Aprovado',      observacoes: ''},
-];
+const RESULTADO_STYLES: Record<string, {bg: string}> = {
+  aprovado:               {bg: GREEN},
+  reprovado:              {bg: Colors.danger},
+  aprovado_com_ressalvas: {bg: ORANGE},
+};
 
 const FILTER_OPTS = ['Todos', 'Aprovado', 'Reprovado', 'Com Ressalvas'];
 
 export const VerificacoesScreen: React.FC = () => {
   const router = useRouter();
   const user = useAppSelector(s => s.auth.user);
-  const [verificacoes, setVerificacoes] = useState<Verificacao[]>(MOCK);
+  const canEdit = ['qualidade', 'direcao'].includes(user?.perfil ?? '');
+  const [verificacoes, setVerificacoes] = useState<InspeccaoQualidade[]>([]);
+  const [isLoading, setIsLoading]       = useState(false);
   const [search, setSearch]     = useState('');
   const [filter, setFilter]     = useState('Todos');
   const [filterOpen, setFilterOpen] = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   const [showNova, setShowNova] = useState(false);
-  const [nova, setNova] = useState({ordemRef: '', tipo: '', inspector: '', observacoes: '', resultado: 'Aprovado' as ResultadoType});
+  const [nova, setNova] = useState({ordemRef: '', tipo: '', observacoes: '', resultado: 'aprovado'});
 
   const getDisplayName = () => {
     if (!user) return 'Utilizador';
@@ -56,28 +46,59 @@ export const VerificacoesScreen: React.FC = () => {
     return parts.length >= 2 ? `${parts[0]} ${parts[parts.length - 1]}` : parts[0];
   };
 
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const data = await qualityApi.getInspeccoes();
+      setVerificacoes(data);
+    } catch (e) {
+      console.error('Erro ao carregar verificações:', e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
   const filtered = verificacoes.filter(v => {
-    const matchFilter = filter === 'Todos' || v.resultado === filter;
+    const displayResultado = RESULTADO_LABEL[v.resultado ?? ''] ?? '';
+    const matchFilter = filter === 'Todos' || displayResultado === filter;
     const q = search.toLowerCase();
-    const matchSearch = !q || v.ref.toLowerCase().includes(q) || v.ordemRef.toLowerCase().includes(q) || v.inspector.toLowerCase().includes(q);
+    const matchSearch = !q
+      || v.referencia.toLowerCase().includes(q)
+      || (v.ordemProducao?.referencia ?? '').toLowerCase().includes(q)
+      || v.inspector.toLowerCase().includes(q);
     return matchFilter && matchSearch;
   });
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (!nova.ordemRef.trim()) return;
-    const id = Date.now().toString();
-    const ref = `INS-2026-${String(verificacoes.length + 1).padStart(3, '0')}`;
-    const today = new Date().toISOString().split('T')[0];
-    setVerificacoes(prev => [...prev, {id, ref, ordemRef: nova.ordemRef, tipo: nova.tipo || 'Inspeção', inspector: nova.inspector, data: today, resultado: nova.resultado, observacoes: nova.observacoes}]);
-    setNova({ordemRef: '', tipo: '', inspector: '', observacoes: '', resultado: 'Aprovado'});
-    setShowNova(false);
+    try {
+      const {data: orderData} = await supabase
+        .from('producao_ordemproducao')
+        .select('id')
+        .eq('referencia', nova.ordemRef.trim())
+        .single();
+      const tipoDb = nova.tipo.toLowerCase().includes('interm') ? 'intermedia' : 'final';
+      await qualityApi.create({
+        ordemProducaoId: orderData?.id,
+        tipo: tipoDb as any,
+        resultado: nova.resultado as any,
+        observacoes: nova.observacoes || undefined,
+      });
+      setNova({ordemRef: '', tipo: '', observacoes: '', resultado: 'aprovado'});
+      setShowNova(false);
+      load();
+    } catch (e) {
+      console.error('Erro ao criar verificação:', e);
+    }
   };
 
   return (
     <View style={styles.container}>
       <AppHeader
         section="QUALIDADE"
-        subtitle="VERIFICAÇÕES"
+
         userName={getDisplayName()}
         onUserPress={() => router.push('/(tabs)/profile')}
         onLogoPress={() => router.push('/(tabs)')}
@@ -108,9 +129,11 @@ export const VerificacoesScreen: React.FC = () => {
           <Text style={styles.filterBtnText}>{filter === 'Todos' ? 'Estado' : filter.slice(0, 6) + '…'}</Text>
           <ChevronDown size={12} color={NAVY} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.novaBtn} onPress={() => setShowNova(true)} activeOpacity={0.85}>
-          <Plus size={16} color="#fff" strokeWidth={3} />
-        </TouchableOpacity>
+        {canEdit && (
+          <TouchableOpacity style={styles.novaBtn} onPress={() => setShowNova(true)} activeOpacity={0.85}>
+            <Plus size={16} color="#fff" strokeWidth={3} />
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.countRow}>
@@ -134,26 +157,37 @@ export const VerificacoesScreen: React.FC = () => {
       </Modal>
 
       {/* List */}
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {filtered.length === 0 && (
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} colors={[Colors.primary]} />}>
+
+        {isLoading && verificacoes.length === 0 && (
+          <View style={{paddingTop: 40, alignItems: 'center'}}>
+            <ActivityIndicator color={Colors.primary} />
+          </View>
+        )}
+        {!isLoading && filtered.length === 0 && (
           <View style={styles.emptyState}><Text style={styles.emptyText}>Nenhuma verificação encontrada.</Text></View>
         )}
         {filtered.map(v => {
-          const st = RESULTADO_STYLES[v.resultado];
+          const st = RESULTADO_STYLES[v.resultado ?? ''] ?? {bg: Colors.gray400};
+          const displayResultado = RESULTADO_LABEL[v.resultado ?? ''] ?? v.resultado ?? '—';
           const expanded = expandedId === v.id;
           return (
             <View key={v.id} style={[styles.card, {borderLeftColor: st.bg}]}>
               <TouchableOpacity style={styles.cardHeader} onPress={() => setExpandedId(expanded ? null : v.id)} activeOpacity={0.85}>
                 <View style={styles.cardHeaderLeft}>
-                  <Text style={styles.cardRef}>{v.ref}</Text>
-                  <Text style={styles.cardSub}>OP {v.ordemRef} · {v.tipo}</Text>
+                  <Text style={styles.cardRef}>{v.referencia}</Text>
+                  <Text style={styles.cardSub}>OP {v.ordemProducao?.referencia ?? '—'} · {v.tipo}</Text>
                   <Text style={styles.cardInspector}>{v.inspector}</Text>
                 </View>
                 <View style={styles.cardHeaderRight}>
                   <View style={[styles.badge, {backgroundColor: st.bg}]}>
-                    <Text style={styles.badgeText}>{v.resultado}</Text>
+                    <Text style={styles.badgeText}>{displayResultado}</Text>
                   </View>
-                  <Text style={styles.cardDate}>{v.data.split('-').reverse().join('/')}</Text>
+                  <Text style={styles.cardDate}>{(v.dataInspeccao ?? '').split('T')[0].split('-').reverse().join('/')}</Text>
                   <Text style={styles.chevron}>{expanded ? '▲' : '▼'}</Text>
                 </View>
               </TouchableOpacity>
@@ -171,7 +205,7 @@ export const VerificacoesScreen: React.FC = () => {
       <BottomNavBar />
 
       {/* Nova verificação modal */}
-      <Modal visible={showNova} transparent animationType="slide" onRequestClose={() => setShowNova(false)}>
+      <Modal visible={canEdit && showNova} transparent animationType="slide" onRequestClose={() => setShowNova(false)}>
         <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setShowNova(false)}>
           <View style={styles.modalBox} onStartShouldSetResponder={() => true}>
             <View style={styles.modalHeader}>
@@ -179,10 +213,9 @@ export const VerificacoesScreen: React.FC = () => {
               <TouchableOpacity onPress={() => setShowNova(false)}><X size={20} color={Colors.gray500} /></TouchableOpacity>
             </View>
             {([
-              {label: 'REFERÊNCIA DA OP *', key: 'ordemRef', placeholder: '2026-0001'},
-              {label: 'TIPO DE INSPEÇÃO',   key: 'tipo',     placeholder: 'Ex: Inspeção Final'},
-              {label: 'INSPECTOR',          key: 'inspector', placeholder: 'Nome do inspector'},
-              {label: 'OBSERVAÇÕES',        key: 'observacoes', placeholder: 'Observações...'},
+              {label: 'REFERÊNCIA DA OP *', key: 'ordemRef',    placeholder: '2026-0001'},
+              {label: 'TIPO DE INSPEÇÃO',   key: 'tipo',         placeholder: 'Ex: Inspeção Final'},
+              {label: 'OBSERVAÇÕES',        key: 'observacoes',  placeholder: 'Observações...'},
             ] as {label: string; key: string; placeholder: string}[]).map(f => (
               <View key={f.key} style={styles.modalField}>
                 <Text style={styles.modalLabel}>{f.label}</Text>
@@ -199,13 +232,13 @@ export const VerificacoesScreen: React.FC = () => {
             <View style={styles.modalField}>
               <Text style={styles.modalLabel}>RESULTADO</Text>
               <View style={styles.resultRow}>
-                {(['Aprovado', 'Com Ressalvas', 'Reprovado'] as ResultadoType[]).map(r => (
+                {(['aprovado', 'aprovado_com_ressalvas', 'reprovado'] as string[]).map(r => (
                   <TouchableOpacity
                     key={r}
                     style={[styles.resultOption, nova.resultado === r && {backgroundColor: RESULTADO_STYLES[r].bg, borderColor: RESULTADO_STYLES[r].bg}]}
                     onPress={() => setNova(p => ({...p, resultado: r}))}
                     activeOpacity={0.85}>
-                    <Text style={[styles.resultOptionText, nova.resultado === r && {color: '#fff'}]}>{r}</Text>
+                    <Text style={[styles.resultOptionText, nova.resultado === r && {color: '#fff'}]}>{RESULTADO_LABEL[r]}</Text>
                   </TouchableOpacity>
                 ))}
               </View>

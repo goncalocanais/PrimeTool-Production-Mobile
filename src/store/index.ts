@@ -4,6 +4,7 @@ import authReducer from './slices/authSlice';
 import ordersReducer from './slices/ordersSlice';
 import materialsReducer from './slices/materialsSlice';
 import offlineReducer from './slices/offlineSlice';
+import montagensReducer from './slices/montagensSlice';
 import {toastMiddleware} from './middleware/toastMiddleware';
 
 export const store = configureStore({
@@ -12,6 +13,7 @@ export const store = configureStore({
     orders: ordersReducer,
     materials: materialsReducer,
     offline: offlineReducer,
+    montagens: montagensReducer,
   },
   middleware: getDefaultMiddleware =>
     getDefaultMiddleware({

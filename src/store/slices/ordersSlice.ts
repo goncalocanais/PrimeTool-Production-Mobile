@@ -13,19 +13,8 @@ interface OrdersState {
   };
 }
 
-const MOCK_ORDERS: OrdemProducao[] = [
-  {id: 8, referencia: '2026-0008', cliente: 'ADRC Vasco da Gama', descricao: 'Painel luminoso Vasco da Gama', quantidade: 1, dataInicio: '2026-04-01T08:00:00Z', dataFimPrevista: '2026-04-26T18:00:00Z', status: 'montagem', prioridade: 'alta', progresso: 75, createdAt: '2026-04-01T08:00:00Z', updatedAt: '2026-04-20T10:00:00Z'},
-  {id: 7, referencia: '2026-0007', cliente: 'Ascendi Operações, SA', descricao: 'Letreiro entrada hotel', quantidade: 2, dataInicio: '2026-03-20T08:00:00Z', dataFimPrevista: '2026-04-30T18:00:00Z', status: 'expedicao', prioridade: 'normal' as any, progresso: 90, createdAt: '2026-03-20T08:00:00Z', updatedAt: '2026-04-22T10:00:00Z'},
-  {id: 6, referencia: '2026-0006', cliente: 'AEISCAC', descricao: 'Letreiro entrada piso 0', quantidade: 1, dataInicio: '2026-03-15T08:00:00Z', dataFimPrevista: '2026-04-28T18:00:00Z', status: 'expedicao', prioridade: 'normal' as any, progresso: 95, createdAt: '2026-03-15T08:00:00Z', updatedAt: '2026-04-23T10:00:00Z'},
-  {id: 5, referencia: '2026-0005', cliente: 'Universidade do Minho', descricao: 'Sinalética exterior campus', quantidade: 12, dataInicio: '2026-03-10T08:00:00Z', dataFimPrevista: '2026-05-10T18:00:00Z', status: 'em_producao', prioridade: 'media', progresso: 50, createdAt: '2026-03-10T08:00:00Z', updatedAt: '2026-04-18T10:00:00Z'},
-  {id: 4, referencia: '2026-0004', cliente: 'Grupo Sonae', descricao: 'Painel LED fachada', quantidade: 1, dataInicio: '2026-03-05T08:00:00Z', dataFimPrevista: '2026-05-15T18:00:00Z', status: 'planeamento', prioridade: 'urgente', progresso: 10, createdAt: '2026-03-05T08:00:00Z', updatedAt: '2026-04-15T10:00:00Z'},
-  {id: 3, referencia: '2026-0003', cliente: 'NOS Comunicações', descricao: 'Totem publicitário exterior', quantidade: 3, dataInicio: '2026-02-20T08:00:00Z', dataFimPrevista: '2026-04-15T18:00:00Z', status: 'qualidade', prioridade: 'alta', progresso: 85, createdAt: '2026-02-20T08:00:00Z', updatedAt: '2026-04-10T10:00:00Z'},
-  {id: 2, referencia: '2026-0002', cliente: 'Câmara Municipal de Coimbra', descricao: 'Painéis informativos parque', quantidade: 6, dataInicio: '2026-02-01T08:00:00Z', dataFimPrevista: '2026-03-30T18:00:00Z', status: 'concluida', prioridade: 'media', progresso: 100, createdAt: '2026-02-01T08:00:00Z', updatedAt: '2026-03-30T10:00:00Z'},
-  {id: 1, referencia: '2026-0001', cliente: 'EDP Renováveis', descricao: 'Sinalização parque solar', quantidade: 20, dataInicio: '2026-01-15T08:00:00Z', dataFimPrevista: '2026-03-01T18:00:00Z', status: 'concluida', prioridade: 'baixa', progresso: 100, createdAt: '2026-01-15T08:00:00Z', updatedAt: '2026-03-01T10:00:00Z'},
-];
-
 const initialState: OrdersState = {
-  orders: MOCK_ORDERS,
+  orders: [],
   selectedOrder: null,
   isLoading: false,
   error: null,

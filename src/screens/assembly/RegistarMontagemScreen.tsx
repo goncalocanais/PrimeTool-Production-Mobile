@@ -1,10 +1,11 @@
 import React, {useState} from 'react';
-import {View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal} from 'react-native';
+import {View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Alert} from 'react-native';
 import {useRouter} from 'expo-router';
-import {Check, X} from 'lucide-react-native';
+import {Check} from 'lucide-react-native';
 import {useAppSelector} from '../../store';
 import {AppHeader, BottomNavBar, DateInput} from '../../components/common';
 import {Colors, Spacing, FontSize, BorderRadius} from '../../theme';
+import {montagensApi} from '../../api/montagens';
 
 const NAVY   = Colors.primary;
 const ORANGE = Colors.warning;
@@ -15,15 +16,14 @@ export const RegistarMontagemScreen: React.FC = () => {
   const user = useAppSelector(s => s.auth.user);
 
   const [form, setForm] = useState({
-    nObra: '',
-    data: '',
-    cliente: '',
-    local: '',
-    morada: '',
-    equipa: '',
+    nObra:       '',
+    titulo:      '',
+    descricao:   '',
+    dataPrevista:'',
     observacoes: '',
   });
-  const [showSuccess, setShowSuccess] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccess, setShowSuccess]   = useState(false);
 
   const getDisplayName = () => {
     if (!user) return 'Utilizador';
@@ -31,52 +31,62 @@ export const RegistarMontagemScreen: React.FC = () => {
     return parts.length >= 2 ? `${parts[0]} ${parts[parts.length - 1]}` : parts[0];
   };
 
-  const isValid = form.nObra.trim() && form.data.trim() && form.cliente.trim();
+  const isValid = form.nObra.trim() && form.titulo.trim();
 
-  const handleSubmit = () => {
-    if (!isValid) return;
-    setShowSuccess(true);
+  const handleSubmit = async () => {
+    if (!isValid || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await montagensApi.create({
+        ordemRef:     form.nObra.trim(),
+        titulo:       form.titulo.trim(),
+        descricao:    form.descricao.trim(),
+        dataPrevista: form.dataPrevista.trim() || undefined,
+        observacoes:  form.observacoes.trim() || undefined,
+      });
+      setShowSuccess(true);
+    } catch (e: any) {
+      Alert.alert('Erro', e?.message ?? 'Não foi possível registar a tarefa.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleConfirm = () => {
     setShowSuccess(false);
-    setForm({nObra: '', data: '', cliente: '', local: '', morada: '', equipa: '', observacoes: ''});
+    setForm({nObra: '', titulo: '', descricao: '', dataPrevista: '', observacoes: ''});
     router.push('/assembly/montagens');
   };
 
   const fields: {label: string; key: keyof typeof form; placeholder: string; required?: boolean; multiline?: boolean; isDate?: boolean}[] = [
-    {label: 'Nº DE OBRA *',         key: 'nObra',        placeholder: '2026-0001', required: true},
-    {label: 'DATA DE MONTAGEM *',   key: 'data',         placeholder: '', required: true, isDate: true},
-    {label: 'CLIENTE *',            key: 'cliente',      placeholder: 'Nome do cliente', required: true},
-    {label: 'LOCAL',                key: 'local',        placeholder: 'Ex: Braga'},
-    {label: 'MORADA',               key: 'morada',       placeholder: 'Rua, nº, código postal'},
-    {label: 'EQUIPA',               key: 'equipa',       placeholder: 'Nomes dos colaboradores'},
-    {label: 'OBSERVAÇÕES',          key: 'observacoes',  placeholder: 'Notas adicionais...', multiline: true},
+    {label: 'Nº DE OBRA *',        key: 'nObra',        placeholder: '2026-0001', required: true},
+    {label: 'TÍTULO DA TAREFA *',  key: 'titulo',       placeholder: 'Ex: Montagem estrutura principal', required: true},
+    {label: 'DESCRIÇÃO',           key: 'descricao',    placeholder: 'Descrição da tarefa...', multiline: true},
+    {label: 'DATA PREVISTA',       key: 'dataPrevista', placeholder: '', isDate: true},
+    {label: 'OBSERVAÇÕES',         key: 'observacoes',  placeholder: 'Notas adicionais...', multiline: true},
   ];
 
   return (
     <View style={styles.container}>
       <AppHeader
         section="MONTAGEM"
-        subtitle="REGISTAR MONTAGEM"
         userName={getDisplayName()}
         onUserPress={() => router.push('/(tabs)/profile')}
         onLogoPress={() => router.push('/(tabs)')}
       />
 
-      {/* Breadcrumb */}
       <View style={styles.breadcrumb}>
         <TouchableOpacity onPress={() => router.push('/assembly/montagens')}>
           <Text style={styles.breadcrumbLink}>MONTAGEM</Text>
         </TouchableOpacity>
         <Text style={styles.breadcrumbSep}> › </Text>
-        <Text style={styles.breadcrumbCurrent}>REGISTAR MONTAGEM</Text>
+        <Text style={styles.breadcrumbCurrent}>REGISTAR TAREFA</Text>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.card}>
           <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>DADOS DA MONTAGEM</Text>
+            <Text style={styles.cardTitle}>DADOS DA TAREFA DE MONTAGEM</Text>
           </View>
 
           {fields.map(f => (
@@ -104,27 +114,26 @@ export const RegistarMontagemScreen: React.FC = () => {
           ))}
 
           <TouchableOpacity
-            style={[styles.submitBtn, !isValid && styles.submitBtnDisabled]}
+            style={[styles.submitBtn, (!isValid || isSubmitting) && styles.submitBtnDisabled]}
             onPress={handleSubmit}
-            disabled={!isValid}
+            disabled={!isValid || isSubmitting}
             activeOpacity={0.85}>
-            <Text style={styles.submitBtnText}>REGISTAR MONTAGEM</Text>
+            <Text style={styles.submitBtnText}>{isSubmitting ? 'A REGISTAR...' : 'REGISTAR TAREFA'}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
 
       <BottomNavBar />
 
-      {/* Success modal */}
       <Modal visible={showSuccess} transparent animationType="fade" onRequestClose={() => setShowSuccess(false)}>
         <View style={styles.overlay}>
           <View style={styles.successBox}>
             <View style={styles.successIcon}>
               <Check size={28} color="#fff" strokeWidth={3} />
             </View>
-            <Text style={styles.successTitle}>Montagem Registada!</Text>
+            <Text style={styles.successTitle}>Tarefa Registada!</Text>
             <Text style={styles.successSub}>
-              A montagem da obra <Text style={{fontFamily: 'Exo2_700Bold'}}>{form.nObra}</Text> foi registada com sucesso.
+              A tarefa <Text style={{fontFamily: 'Exo2_700Bold'}}>{form.titulo || form.nObra}</Text> foi registada com sucesso.
             </Text>
             <TouchableOpacity style={styles.successBtn} onPress={handleConfirm} activeOpacity={0.85}>
               <Text style={styles.successBtnText}>OK</Text>

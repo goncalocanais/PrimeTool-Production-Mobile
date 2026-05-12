@@ -1,86 +1,51 @@
-import React, {useState} from 'react';
+import React, {useState, useEffect, useCallback} from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Modal,
+  TextInput, Modal, RefreshControl, ActivityIndicator,
 } from 'react-native';
 import {useRouter} from 'expo-router';
 import {Search, ChevronDown, Plus, X, AlertTriangle, Package, ArrowUp} from 'lucide-react-native';
 import {useAppSelector} from '../../store';
 import {AppHeader, BottomNavBar} from '../../components/common';
 import {Colors, Spacing, FontSize, BorderRadius} from '../../theme';
+import {materialsApi} from '../../api/materials';
+import {Material} from '../../types';
 
 const NAVY   = Colors.primary;
 const ORANGE = Colors.warning;
 const GREEN  = Colors.success;
 
-type CategoriaType = 'Matérias-primas' | 'Componentes Elétricos' | 'Perfis Metálicos' | 'Fixações' | 'Tintas' | 'Consumíveis' | 'Ferramentas';
-
-interface Material {
-  id: string;
-  codigo: string;
-  nome: string;
-  categoria: CategoriaType;
-  unidade: string;
-  stockAtual: number;
-  stockMinimo: number;
-  stockMaximo: number;
-  localizacao: string;
-  fornecedor: string;
-}
-
-const MOCK: Material[] = [
-  {id: '1',  codigo: 'MP-001', nome: 'Chapa de Aço 2mm',            categoria: 'Matérias-primas',       unidade: 'un',  stockAtual: 45,  stockMinimo: 20,  stockMaximo: 100, localizacao: 'A1-01', fornecedor: 'AçoMais Lda'},
-  {id: '2',  codigo: 'MP-002', nome: 'Chapa de Aço Inox 1.5mm',     categoria: 'Matérias-primas',       unidade: 'un',  stockAtual: 8,   stockMinimo: 15,  stockMaximo: 60,  localizacao: 'A1-02', fornecedor: 'AçoMais Lda'},
-  {id: '3',  codigo: 'MP-003', nome: 'Alumínio Extrudido 40x40',    categoria: 'Perfis Metálicos',      unidade: 'ml',  stockAtual: 120, stockMinimo: 50,  stockMaximo: 300, localizacao: 'A2-01', fornecedor: 'MetalPerfis Norte'},
-  {id: '4',  codigo: 'MP-004', nome: 'Perfil LED 2m',               categoria: 'Componentes Elétricos', unidade: 'un',  stockAtual: 0,   stockMinimo: 10,  stockMaximo: 50,  localizacao: 'B1-03', fornecedor: 'ElectroSupply SA'},
-  {id: '5',  codigo: 'CE-001', nome: 'Fonte de Alimentação 12V 5A', categoria: 'Componentes Elétricos', unidade: 'un',  stockAtual: 22,  stockMinimo: 10,  stockMaximo: 40,  localizacao: 'B1-01', fornecedor: 'ElectroSupply SA'},
-  {id: '6',  codigo: 'CE-002', nome: 'Fita LED RGB 5m',             categoria: 'Componentes Elétricos', unidade: 'rolo',stockAtual: 4,   stockMinimo: 8,   stockMaximo: 30,  localizacao: 'B1-02', fornecedor: 'ElectroSupply SA'},
-  {id: '7',  codigo: 'FX-001', nome: 'Parafuso Inox M6x20',         categoria: 'Fixações',              unidade: 'cx',  stockAtual: 35,  stockMinimo: 10,  stockMaximo: 80,  localizacao: 'C1-01', fornecedor: 'Parafusaria Central'},
-  {id: '8',  codigo: 'FX-002', nome: 'Rebite Pop 4mm',              categoria: 'Fixações',              unidade: 'cx',  stockAtual: 12,  stockMinimo: 10,  stockMaximo: 50,  localizacao: 'C1-02', fornecedor: 'Parafusaria Central'},
-  {id: '9',  codigo: 'TN-001', nome: 'Tinta Epoxy Branca',          categoria: 'Tintas',                unidade: 'lt',  stockAtual: 28,  stockMinimo: 10,  stockMaximo: 60,  localizacao: 'D1-01', fornecedor: 'Tintas & Revestimentos SA'},
-  {id: '10', codigo: 'TN-002', nome: 'Primário Anti-Corrosão',      categoria: 'Tintas',                unidade: 'lt',  stockAtual: 6,   stockMinimo: 8,   stockMaximo: 30,  localizacao: 'D1-02', fornecedor: 'Tintas & Revestimentos SA'},
-  {id: '11', codigo: 'CN-001', nome: 'Disco de Corte 230mm',        categoria: 'Consumíveis',           unidade: 'un',  stockAtual: 18,  stockMinimo: 10,  stockMaximo: 50,  localizacao: 'E1-01', fornecedor: 'IsoTec Materiais'},
-  {id: '12', codigo: 'CN-002', nome: 'Eléctrodo de Soldadura 2.5',  categoria: 'Consumíveis',           unidade: 'kg',  stockAtual: 0,   stockMinimo: 5,   stockMaximo: 20,  localizacao: 'E1-02', fornecedor: 'FerroMax Indústria SA'},
-  {id: '13', codigo: 'PM-001', nome: 'Perfil Alumínio 30x30',       categoria: 'Perfis Metálicos',      unidade: 'ml',  stockAtual: 80,  stockMinimo: 40,  stockMaximo: 200, localizacao: 'A2-02', fornecedor: 'MetalPerfis Norte'},
-  {id: '14', codigo: 'PM-002', nome: 'Tubo Aço Redondo 25mm',       categoria: 'Matérias-primas',       unidade: 'ml',  stockAtual: 35,  stockMinimo: 20,  stockMaximo: 100, localizacao: 'A1-03', fornecedor: 'FerroMax Indústria SA'},
-];
-
-const CATEGORIAS = ['Todas', 'Matérias-primas', 'Componentes Elétricos', 'Perfis Metálicos', 'Fixações', 'Tintas', 'Consumíveis', 'Ferramentas'];
-const FILTROS    = ['Todos', 'Stock baixo', 'Sem stock'];
+const FILTROS = ['Todos', 'Stock baixo', 'Sem stock'];
 
 const getStockStatus = (m: Material) => {
-  if (m.stockAtual === 0)            return {label: 'SEM STOCK',   color: Colors.danger, bg: Colors.danger + '18'};
+  if (m.stockAtual === 0)                              return {label: 'SEM STOCK',   color: Colors.danger, bg: Colors.danger + '18'};
   if (m.stockAtual <= m.stockMinimo) return {label: 'STOCK BAIXO', color: ORANGE,        bg: ORANGE        + '18'};
-  return                                    {label: 'OK',           color: GREEN,         bg: GREEN         + '18'};
+  return                                               {label: 'OK',           color: GREEN,         bg: GREEN         + '18'};
 };
 
 export const InventarioScreen: React.FC = () => {
-  const router = useRouter();
-  const user = useAppSelector(s => s.auth.user);
+  const router   = useRouter();
+  const user     = useAppSelector(s => s.auth.user);
   const canManage = ['armazem', 'direcao'].includes(user?.perfil ?? '');
 
-  const [materiais, setMateriais]   = useState<Material[]>(MOCK);
+  const [materiais, setMateriais]   = useState<Material[]>([]);
+  const [isLoading, setIsLoading]   = useState(false);
   const [search, setSearch]         = useState('');
   const [filtro, setFiltro]         = useState('Todos');
-  const [categoria, setCategoria]   = useState('Todas');
   const [filtroOpen, setFiltroOpen] = useState(false);
-  const [catOpen, setCatOpen]       = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  // Pedir material
-  const [showPedido, setShowPedido] = useState(false);
-  const [pedidoMat, setPedidoMat]   = useState<Material | null>(null);
-  const [pedidoQty, setPedidoQty]   = useState('');
-  const [pedidoMotivo, setPedidoMotivo] = useState('');
+  const [showPedido, setShowPedido]       = useState(false);
+  const [pedidoMat, setPedidoMat]         = useState<Material | null>(null);
+  const [pedidoQty, setPedidoQty]         = useState('');
+  const [pedidoMotivo, setPedidoMotivo]   = useState('');
 
-  // Dar entrada
-  const [showEntrada, setShowEntrada] = useState(false);
-  const [entradaMat, setEntradaMat]   = useState<Material | null>(null);
-  const [entradaQty, setEntradaQty]   = useState('');
+  const [showEntrada, setShowEntrada]     = useState(false);
+  const [entradaMat, setEntradaMat]       = useState<Material | null>(null);
+  const [entradaQty, setEntradaQty]       = useState('');
 
-  // Novo material
-  const [showAddMat, setShowAddMat] = useState(false);
-  const [novoMat, setNovoMat]       = useState({codigo: '', nome: '', categoria: 'Matérias-primas' as CategoriaType, unidade: '', stockMinimo: '', stockMaximo: '', localizacao: '', fornecedor: ''});
+  const [showAddMat, setShowAddMat]       = useState(false);
+  const [novoMat, setNovoMat]             = useState({codigo: '', nome: '', unidade: '', stockMinimo: '', localizacao: ''});
 
   const getDisplayName = () => {
     if (!user) return 'Utilizador';
@@ -88,52 +53,70 @@ export const InventarioScreen: React.FC = () => {
     return parts.length >= 2 ? `${parts[0]} ${parts[parts.length - 1]}` : parts[0];
   };
 
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const data = await materialsApi.getAll(search || undefined);
+      setMateriais(data);
+    } catch (e) {
+      console.error('Erro ao carregar materiais:', e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [search]);
+
+  useEffect(() => { load(); }, [load]);
+
   const filtered = materiais.filter(m => {
-    const matchCat    = categoria === 'Todas' || m.categoria === categoria;
-    const matchFiltro = filtro === 'Todos'
-      || (filtro === 'Sem stock'   && m.stockAtual === 0)
-      || (filtro === 'Stock baixo' && m.stockAtual > 0 && m.stockAtual <= m.stockMinimo);
-    const q = search.toLowerCase();
-    const matchSearch = !q || m.codigo.toLowerCase().includes(q) || m.nome.toLowerCase().includes(q) || m.localizacao.toLowerCase().includes(q);
-    return matchCat && matchFiltro && matchSearch;
+    if (filtro === 'Sem stock')   return m.stockAtual === 0;
+    if (filtro === 'Stock baixo') return m.stockAtual > 0 && m.stockAtual <= m.stockMinimo;
+    return true;
   });
 
   const semStock   = materiais.filter(m => m.stockAtual === 0).length;
   const stockBaixo = materiais.filter(m => m.stockAtual > 0 && m.stockAtual <= m.stockMinimo).length;
 
   const handlePedido = () => {
-    setPedidoQty('');
-    setPedidoMotivo('');
+    // Pedido de material deve ser feito a partir de uma OP
     setShowPedido(false);
     setPedidoMat(null);
   };
 
-  const handleAddMaterial = () => {
+  const handleAddMaterial = async () => {
     if (!novoMat.codigo.trim() || !novoMat.nome.trim()) return;
-    setMateriais(prev => [...prev, {
-      id: Date.now().toString(),
-      codigo: novoMat.codigo, nome: novoMat.nome,
-      categoria: novoMat.categoria, unidade: novoMat.unidade,
-      stockAtual: 0,
-      stockMinimo: Number(novoMat.stockMinimo) || 0,
-      stockMaximo: Number(novoMat.stockMaximo) || 100,
-      localizacao: novoMat.localizacao, fornecedor: novoMat.fornecedor,
-    }]);
-    setNovoMat({codigo: '', nome: '', categoria: 'Matérias-primas', unidade: '', stockMinimo: '', stockMaximo: '', localizacao: '', fornecedor: ''});
-    setShowAddMat(false);
+    try {
+      await materialsApi.createMaterial({
+        codigo:      novoMat.codigo.trim(),
+        nome:        novoMat.nome.trim(),
+        unidade:     novoMat.unidade.trim() || 'un',
+        stockMinimo: Number(novoMat.stockMinimo) || 0,
+        localizacao: novoMat.localizacao.trim(),
+      });
+      setNovoMat({codigo: '', nome: '', unidade: '', stockMinimo: '', localizacao: ''});
+      setShowAddMat(false);
+      load();
+    } catch (e) {
+      console.error('Erro ao criar material:', e);
+    }
   };
 
-  const handleEntrada = () => {
+  const handleEntrada = async () => {
     const qty = Number(entradaQty);
     if (!entradaMat || !qty || qty <= 0) return;
-    setMateriais(prev => prev.map(m =>
-      m.id === entradaMat.id
-        ? {...m, stockAtual: Math.min(m.stockMaximo, m.stockAtual + qty)}
-        : m
-    ));
-    setEntradaQty('');
-    setShowEntrada(false);
-    setEntradaMat(null);
+    try {
+      await materialsApi.registarMovimento({
+        materialId: entradaMat.id,
+        tipo: 'entrada',
+        quantidade: qty,
+        motivo: 'Entrada manual',
+      });
+      setEntradaQty('');
+      setShowEntrada(false);
+      setEntradaMat(null);
+      load();
+    } catch (e) {
+      console.error('Erro ao registar entrada:', e);
+    }
   };
 
   return (
@@ -145,7 +128,6 @@ export const InventarioScreen: React.FC = () => {
         onLogoPress={() => router.push('/(tabs)')}
       />
 
-      {/* Alertas rápidos */}
       {(semStock > 0 || stockBaixo > 0) && (
         <View style={styles.alertBar}>
           {semStock > 0 && (
@@ -163,7 +145,6 @@ export const InventarioScreen: React.FC = () => {
         </View>
       )}
 
-      {/* Toolbar */}
       <View style={styles.toolbar}>
         <View style={styles.searchBox}>
           <Search size={14} color={Colors.gray400} />
@@ -182,14 +163,7 @@ export const InventarioScreen: React.FC = () => {
         )}
       </View>
 
-      {/* Filtros */}
       <View style={styles.filtersRow}>
-        <TouchableOpacity style={styles.filterChip} onPress={() => setCatOpen(true)} activeOpacity={0.85}>
-          <Text style={styles.filterChipText} numberOfLines={1}>
-            {categoria === 'Todas' ? 'Categoria' : categoria.length > 12 ? categoria.slice(0, 12) + '…' : categoria}
-          </Text>
-          <ChevronDown size={11} color={NAVY} />
-        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.filterChip, filtro !== 'Todos' && styles.filterChipActive]}
           onPress={() => setFiltroOpen(true)}
@@ -199,20 +173,6 @@ export const InventarioScreen: React.FC = () => {
         </TouchableOpacity>
         <Text style={styles.countText}>{filtered.length} materiais</Text>
       </View>
-
-      {/* Modais de filtro */}
-      <Modal visible={catOpen} transparent animationType="fade" onRequestClose={() => setCatOpen(false)}>
-        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setCatOpen(false)}>
-          <View style={styles.filterMenu}>
-            {CATEGORIAS.map(c => (
-              <TouchableOpacity key={c} style={[styles.filterMenuItem, c === categoria && styles.filterMenuItemActive]}
-                onPress={() => {setCategoria(c); setCatOpen(false);}}>
-                <Text style={[styles.filterMenuText, c === categoria && styles.filterMenuTextActive]}>{c}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </TouchableOpacity>
-      </Modal>
 
       <Modal visible={filtroOpen} transparent animationType="fade" onRequestClose={() => setFiltroOpen(false)}>
         <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setFiltroOpen(false)}>
@@ -227,9 +187,19 @@ export const InventarioScreen: React.FC = () => {
         </TouchableOpacity>
       </Modal>
 
-      {/* Lista */}
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {filtered.length === 0 && (
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} colors={[Colors.primary]} />}>
+
+        {isLoading && materiais.length === 0 && (
+          <View style={styles.emptyState}>
+            <ActivityIndicator color={Colors.primary} />
+          </View>
+        )}
+
+        {!isLoading && filtered.length === 0 && (
           <View style={styles.emptyState}>
             <Package size={40} color={Colors.gray300} />
             <Text style={styles.emptyText}>Nenhum material encontrado.</Text>
@@ -255,7 +225,7 @@ export const InventarioScreen: React.FC = () => {
                     </View>
                   </View>
                   <Text style={styles.cardNome}>{m.nome}</Text>
-                  <Text style={styles.cardCat}>{m.categoria}</Text>
+                  {m.categoria && <Text style={styles.cardCat}>{m.categoria}</Text>}
                   <View style={styles.stockBarBg}>
                     <View style={[styles.stockBarFill, {width: `${pct}%` as any, backgroundColor: st.color}]} />
                   </View>
@@ -289,8 +259,6 @@ export const InventarioScreen: React.FC = () => {
                       <Text style={styles.bodyValue}>{m.fornecedor || '—'}</Text>
                     </View>
                   </View>
-
-                  {/* Ações */}
                   <View style={styles.actionsRow}>
                     {canManage && (
                       <TouchableOpacity
@@ -356,8 +324,11 @@ export const InventarioScreen: React.FC = () => {
                 onChangeText={setPedidoMotivo}
               />
             </View>
+            <View style={styles.infoBox}>
+              <Text style={styles.infoText}>Para criar um pedido de material ligado a uma OP, aceda ao detalhe da ordem de produção.</Text>
+            </View>
             <TouchableOpacity style={styles.modalSaveBtn} onPress={handlePedido} activeOpacity={0.85}>
-              <Text style={styles.modalSaveBtnText}>ENVIAR PEDIDO</Text>
+              <Text style={styles.modalSaveBtnText}>FECHAR</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -373,13 +344,11 @@ export const InventarioScreen: React.FC = () => {
                 <TouchableOpacity onPress={() => setShowAddMat(false)}><X size={20} color={Colors.gray500} /></TouchableOpacity>
               </View>
               {([
-                {label: 'CÓDIGO *',       key: 'codigo',      placeholder: 'Ex: MP-015'},
-                {label: 'DESIGNAÇÃO *',   key: 'nome',        placeholder: 'Ex: Chapa Aço 3mm'},
-                {label: 'UNIDADE',        key: 'unidade',     placeholder: 'Ex: un, ml, kg, lt'},
-                {label: 'STOCK MÍNIMO',   key: 'stockMinimo', placeholder: '0',   keyboardType: 'numeric'},
-                {label: 'STOCK MÁXIMO',   key: 'stockMaximo', placeholder: '100', keyboardType: 'numeric'},
-                {label: 'LOCALIZAÇÃO',    key: 'localizacao', placeholder: 'Ex: A1-04'},
-                {label: 'FORNECEDOR',     key: 'fornecedor',  placeholder: 'Nome do fornecedor'},
+                {label: 'CÓDIGO *',     key: 'codigo',      placeholder: 'Ex: MP-015'},
+                {label: 'DESIGNAÇÃO *', key: 'nome',        placeholder: 'Ex: Chapa Aço 3mm'},
+                {label: 'UNIDADE',      key: 'unidade',     placeholder: 'Ex: un, ml, kg, lt'},
+                {label: 'STOCK MÍNIMO', key: 'stockMinimo', placeholder: '0', keyboardType: 'numeric'},
+                {label: 'LOCALIZAÇÃO',  key: 'localizacao', placeholder: 'Ex: A1-04'},
               ] as any[]).map((f: any) => (
                 <View key={f.key} style={styles.modalField}>
                   <Text style={styles.modalLabel}>{f.label}</Text>
@@ -514,4 +483,7 @@ const styles = StyleSheet.create({
   modalSaveBtnText: {color: '#fff', fontFamily: 'Exo2_700Bold', fontSize: FontSize.sm, letterSpacing: 1},
   modalScroll: {flex: 1, width: '100%'},
   modalScrollContent: {flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: Spacing.xl},
+
+  infoBox: {backgroundColor: Colors.primaryUltraLight, borderRadius: 8, padding: Spacing.md, marginBottom: Spacing.sm},
+  infoText: {fontSize: 11, color: Colors.primaryLight, fontFamily: 'Exo2_400Regular', lineHeight: 16},
 });

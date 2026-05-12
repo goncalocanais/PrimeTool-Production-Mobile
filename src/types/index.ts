@@ -1,7 +1,6 @@
 // ─── Perfis / Departamentos ────────────────────────────────────────────────────
 export type UserRole =
   | 'direcao'
-  | 'rh'
   | 'planeamento'
   | 'armazem'
   | 'producao'
@@ -62,6 +61,7 @@ export interface Material {
   codigo: string;
   nome: string;
   descricao?: string;
+  categoria?: string;
   unidade: string;
   stockAtual: number;
   stockMinimo: number;

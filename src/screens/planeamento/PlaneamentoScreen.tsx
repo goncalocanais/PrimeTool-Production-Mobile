@@ -1,79 +1,78 @@
-import React, {useState} from 'react';
+import React, {useState, useEffect, useCallback} from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Modal,
+  TextInput, Modal, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import {useRouter} from 'expo-router';
 import {Search, ChevronDown, Plus, Pencil, Trash2, X, Check} from 'lucide-react-native';
 import {useAppSelector} from '../../store';
 import {AppHeader, BottomNavBar, DateInput} from '../../components/common';
 import {Colors, Spacing, FontSize, BorderRadius} from '../../theme';
+import {ordersApi} from '../../api/orders';
+import {OrdemProducao, OPStatus} from '../../types';
 
 const NAVY   = Colors.primary;
 const ORANGE = Colors.warning;
 const GREEN  = Colors.success;
 
-type EstadoOP = 'PLANEAMENTO' | 'EM PRODUÇÃO' | 'EM MONTAGEM' | 'EM EXPEDIÇÃO' | 'AGUARDA MATERIAL' | 'CONCLUÍDA' | 'SUSPENSA';
-
-const ESTADO_STYLES: Record<EstadoOP, {bg: string}> = {
-  'PLANEAMENTO':      {bg: Colors.primaryLight},
-  'EM PRODUÇÃO':      {bg: '#3b82f6'},
-  'EM MONTAGEM':      {bg: ORANGE},
-  'EM EXPEDIÇÃO':     {bg: '#8b5cf6'},
-  'AGUARDA MATERIAL': {bg: '#eab308'},
-  'CONCLUÍDA':        {bg: GREEN},
-  'SUSPENSA':         {bg: Colors.danger},
+// Mapeamento DB estado → label de ecrã
+const ESTADO_LABEL: Record<string, string> = {
+  planeamento:  'PLANEAMENTO',
+  em_producao:  'EM PRODUÇÃO',
+  montagem:     'EM MONTAGEM',
+  expedicao:    'EM EXPEDIÇÃO',
+  qualidade:    'EM QUALIDADE',
+  concluida:    'CONCLUÍDA',
+  cancelada:    'CANCELADA',
 };
 
-const ESTADO_OPTIONS: EstadoOP[] = [
-  'PLANEAMENTO', 'EM PRODUÇÃO', 'EM MONTAGEM', 'EM EXPEDIÇÃO', 'AGUARDA MATERIAL', 'CONCLUÍDA', 'SUSPENSA',
-];
+const ESTADO_STYLES: Record<string, {bg: string}> = {
+  planeamento: {bg: Colors.primaryLight},
+  em_producao: {bg: '#3b82f6'},
+  montagem:    {bg: ORANGE},
+  expedicao:   {bg: '#8b5cf6'},
+  qualidade:   {bg: Colors.success},
+  concluida:   {bg: GREEN},
+  cancelada:   {bg: Colors.danger},
+};
 
-const FILTER_OPTS = ['Todos', ...ESTADO_OPTIONS.map(e => e)];
+const DB_ESTADOS: OPStatus[] = ['planeamento','em_producao','montagem','expedicao','qualidade','concluida','cancelada'];
+const FILTER_OPTS = ['Todos', ...DB_ESTADOS];
 
-interface OrdemPlaneamento {
-  id: string;
-  ref: string;
-  nome: string;
-  cliente: string;
-  estado: EstadoOP;
-  dataInicio: string;
-  dataFim: string;
-  responsavel: string;
-  prioridade: 'Alta' | 'Média' | 'Normal';
-}
-
-const MOCK_ORDENS: OrdemPlaneamento[] = [
-  {id: '1', ref: '2026-0001', nome: 'Sinalética exterior campus',    cliente: 'Universidade do Minho', estado: 'EM PRODUÇÃO',      dataInicio: '2026-03-01', dataFim: '2026-04-30', responsavel: 'João Silva',    prioridade: 'Alta'},
-  {id: '2', ref: '2026-0002', nome: 'Estrutura metálica armazém',    cliente: 'Logística Rápida Lda',  estado: 'SUSPENSA',          dataInicio: '2026-02-15', dataFim: '2026-04-15', responsavel: 'Maria Costa',   prioridade: 'Normal'},
-  {id: '3', ref: '2026-0003', nome: 'Painel LED fachada',            cliente: 'Grupo Sonae',           estado: 'AGUARDA MATERIAL',  dataInicio: '2026-03-10', dataFim: '2026-05-20', responsavel: 'António Melo',  prioridade: 'Média'},
-  {id: '4', ref: '2026-0004', nome: 'Letreiro entrada piso 0',       cliente: 'AEISCAC',               estado: 'EM EXPEDIÇÃO',      dataInicio: '2026-01-20', dataFim: '2026-03-30', responsavel: 'Filipa Rocha',  prioridade: 'Alta'},
-  {id: '5', ref: '2026-0005', nome: 'Painel luminoso Vasco da Gama', cliente: 'ADRC Vasco da Gama',    estado: 'EM MONTAGEM',       dataInicio: '2026-02-01', dataFim: '2026-04-10', responsavel: 'Carlos Ferreira',prioridade: 'Média'},
-  {id: '6', ref: '2026-0006', nome: 'Letreiro entrada hotel',        cliente: 'Ascendi Operações, SA', estado: 'EM EXPEDIÇÃO',      dataInicio: '2026-02-10', dataFim: '2026-04-05', responsavel: 'Sandra Pinto',  prioridade: 'Alta'},
-  {id: '7', ref: '2026-0007', nome: 'Letreiro bar ISCAC',            cliente: 'AEISCAC',               estado: 'EM MONTAGEM',       dataInicio: '2026-03-01', dataFim: '2026-04-25', responsavel: 'Rui Almeida',   prioridade: 'Normal'},
-  {id: '8', ref: '2026-0008', nome: 'Sistema sinalética hospitalar', cliente: 'Hospital São João',      estado: 'PLANEAMENTO',       dataInicio: '2026-04-01', dataFim: '2026-06-30', responsavel: 'Paulo Martins', prioridade: 'Alta'},
-];
-
+const PRIORIDADE_LABEL: Record<string, string> = {
+  baixa: 'Normal', media: 'Média', alta: 'Alta', urgente: 'Alta',
+};
+const PRIORIDADE_DB: Record<string, OPStatus> = {};
 const PRIORIDADE_COLORS: Record<string, string> = {
   Alta: Colors.danger, Média: ORANGE, Normal: Colors.primaryLight,
 };
 
-const EMPTY_NOVA = {nome: '', cliente: '', dataInicio: '', dataFim: '', responsavel: '', prioridade: 'Normal' as 'Alta' | 'Média' | 'Normal'};
+const toDate = (s?: string) => {
+  if (!s) return '—';
+  if (s.includes('/')) return s;
+  const [y, m, d] = s.split('T')[0].split('-');
+  return d && m && y ? `${d}/${m}/${y}` : '—';
+};
+
+const EMPTY_NOVA = {nome: '', cliente: '', dataInicio: '', dataFim: '', responsavel: '', prioridade: 'media' as OPStatus};
 
 export const PlaneamentoScreen: React.FC = () => {
-  const router = useRouter();
-  const user = useAppSelector(s => s.auth.user);
-  const [ordens, setOrdens]           = useState<OrdemPlaneamento[]>(MOCK_ORDENS);
+  const router  = useRouter();
+  const user    = useAppSelector(s => s.auth.user);
+  const canEdit = ['planeamento', 'direcao'].includes(user?.perfil ?? '');
+
+  const [ordens, setOrdens]           = useState<OrdemProducao[]>([]);
+  const [isLoading, setIsLoading]     = useState(false);
   const [search, setSearch]           = useState('');
   const [filter, setFilter]           = useState('Todos');
   const [filterOpen, setFilterOpen]   = useState(false);
-  const [expandedId, setExpandedId]   = useState<string | null>(null);
-  const [editingId, setEditingId]     = useState<string | null>(null);
-  const [editData, setEditData]       = useState<Partial<OrdemPlaneamento>>({});
-  const [deleteId, setDeleteId]       = useState<string | null>(null);
+  const [expandedId, setExpandedId]   = useState<number | null>(null);
+  const [editingId, setEditingId]     = useState<number | null>(null);
+  const [editData, setEditData]       = useState<{nome: string; dataInicio: string; dataFim: string; responsavel: string}>({nome: '', dataInicio: '', dataFim: '', responsavel: ''});
+  const [deleteId, setDeleteId]       = useState<number | null>(null);
   const [showNova, setShowNova]       = useState(false);
   const [nova, setNova]               = useState(EMPTY_NOVA);
-  const [estadoPickId, setEstadoPickId] = useState<string | null>(null);
+  const [estadoPickId, setEstadoPickId] = useState<number | null>(null);
 
   const getDisplayName = () => {
     if (!user) return 'Utilizador';
@@ -81,53 +80,84 @@ export const PlaneamentoScreen: React.FC = () => {
     return parts.length >= 2 ? `${parts[0]} ${parts[parts.length - 1]}` : parts[0];
   };
 
-  const filtered = ordens.filter(o => {
-    const matchFilter = filter === 'Todos' || o.estado === filter;
-    const q = search.toLowerCase();
-    const matchSearch = !q || o.ref.toLowerCase().includes(q) || o.nome.toLowerCase().includes(q) || o.cliente.toLowerCase().includes(q);
-    return matchFilter && matchSearch;
-  });
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const data = await ordersApi.getAll({search: search || undefined});
+      setOrdens(data);
+    } catch (e) {
+      console.error('Erro ao carregar ordens:', e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [search]);
 
-  const startEdit = (o: OrdemPlaneamento) => {
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = ordens.filter(o =>
+    filter === 'Todos' || o.status === filter,
+  );
+
+  const startEdit = (o: OrdemProducao) => {
     setEditingId(o.id);
-    setEditData({nome: o.nome, cliente: o.cliente, dataInicio: o.dataInicio, dataFim: o.dataFim, responsavel: o.responsavel, prioridade: o.prioridade});
+    setEditData({nome: o.descricao, dataInicio: o.dataInicio, dataFim: o.dataFimPrevista, responsavel: o.responsavel ?? ''});
   };
 
-  const saveEdit = (id: string) => {
-    setOrdens(prev => prev.map(o => o.id === id ? {...o, ...editData} : o));
-    setEditingId(null);
-    setEditData({});
+  const saveEdit = async (id: number) => {
+    try {
+      await ordersApi.update(id, {
+        descricao: editData.nome,
+        dataInicio: editData.dataInicio,
+        dataFimPrevista: editData.dataFim,
+        responsavel: editData.responsavel,
+      });
+      setEditingId(null);
+      load();
+    } catch (e) {
+      console.error('Erro ao guardar:', e);
+    }
   };
 
-  const confirmDelete = () => {
-    if (deleteId) setOrdens(prev => prev.filter(o => o.id !== deleteId));
-    setDeleteId(null);
-    if (expandedId === deleteId) setExpandedId(null);
+  const confirmDelete = async () => {
+    if (!deleteId) return;
+    try {
+      await ordersApi.delete(deleteId);
+      setDeleteId(null);
+      if (expandedId === deleteId) setExpandedId(null);
+      load();
+    } catch (e) {
+      console.error('Erro ao eliminar:', e);
+      setDeleteId(null);
+    }
   };
 
-  const addOrdem = () => {
+  const addOrdem = async () => {
     if (!nova.nome.trim()) return;
-    const newId = Date.now().toString();
-    const year = new Date().getFullYear();
-    const nextRef = `${year}-${String(ordens.length + 1).padStart(4, '0')}`;
-    setOrdens(prev => [...prev, {
-      id: newId, ref: nextRef, nome: nova.nome, cliente: nova.cliente,
-      estado: 'PLANEAMENTO', dataInicio: nova.dataInicio, dataFim: nova.dataFim,
-      responsavel: nova.responsavel, prioridade: nova.prioridade,
-    }]);
-    setNova(EMPTY_NOVA);
-    setShowNova(false);
+    try {
+      await ordersApi.create({
+        descricao:      nova.nome,
+        status:         'planeamento',
+        prioridade:     'media',
+        dataInicio:     nova.dataInicio,
+        dataFimPrevista:nova.dataFim,
+        responsavel:    nova.responsavel,
+      });
+      setNova(EMPTY_NOVA);
+      setShowNova(false);
+      load();
+    } catch (e) {
+      console.error('Erro ao criar ordem:', e);
+    }
   };
 
-  const handleEstadoChange = (id: string, estado: EstadoOP) => {
-    setOrdens(prev => prev.map(o => o.id === id ? {...o, estado} : o));
-    setEstadoPickId(null);
-  };
-
-  const toDate = (s: string) => {
-    if (!s) return '—';
-    const [y, m, d] = s.split('-');
-    return `${d}/${m}/${y}`;
+  const handleEstadoChange = async (id: number, estado: OPStatus) => {
+    try {
+      await ordersApi.updateStatus(id, estado);
+      setEstadoPickId(null);
+      load();
+    } catch (e) {
+      console.error('Erro ao atualizar estado:', e);
+    }
   };
 
   return (
@@ -139,7 +169,6 @@ export const PlaneamentoScreen: React.FC = () => {
         onLogoPress={() => router.push('/(tabs)')}
       />
 
-      {/* Toolbar */}
       <View style={styles.toolbar}>
         <View style={styles.searchBox}>
           <Search size={14} color={Colors.gray400} />
@@ -152,19 +181,22 @@ export const PlaneamentoScreen: React.FC = () => {
           />
         </View>
         <TouchableOpacity style={styles.filterBtn} onPress={() => setFilterOpen(true)} activeOpacity={0.85}>
-          <Text style={styles.filterBtnText} numberOfLines={1}>{filter === 'Todos' ? 'Estado' : filter.slice(0, 6) + '…'}</Text>
+          <Text style={styles.filterBtnText} numberOfLines={1}>
+            {filter === 'Todos' ? 'Estado' : (ESTADO_LABEL[filter] ?? filter).slice(0, 6) + '…'}
+          </Text>
           <ChevronDown size={12} color={NAVY} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.novaBtn} onPress={() => setShowNova(true)} activeOpacity={0.85}>
-          <Plus size={16} color="#fff" strokeWidth={3} />
-        </TouchableOpacity>
+        {canEdit && (
+          <TouchableOpacity style={styles.novaBtn} onPress={() => setShowNova(true)} activeOpacity={0.85}>
+            <Plus size={16} color="#fff" strokeWidth={3} />
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.countRow}>
         <Text style={styles.countText}>{filtered.length} ORDENS DE PRODUÇÃO</Text>
       </View>
 
-      {/* Filter modal */}
       <Modal visible={filterOpen} transparent animationType="fade" onRequestClose={() => setFilterOpen(false)}>
         <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setFilterOpen(false)}>
           <View style={styles.filterMenu}>
@@ -173,55 +205,70 @@ export const PlaneamentoScreen: React.FC = () => {
                 key={opt}
                 style={[styles.filterItem, opt === filter && styles.filterItemActive]}
                 onPress={() => {setFilter(opt); setFilterOpen(false);}}>
-                <Text style={[styles.filterItemText, opt === filter && styles.filterItemTextActive]}>{opt}</Text>
+                <Text style={[styles.filterItemText, opt === filter && styles.filterItemTextActive]}>
+                  {opt === 'Todos' ? 'Todos' : (ESTADO_LABEL[opt] ?? opt)}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>
         </TouchableOpacity>
       </Modal>
 
-      {/* List */}
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {filtered.length === 0 && (
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} colors={[Colors.primary]} />}>
+
+        {isLoading && ordens.length === 0 && (
+          <View style={styles.emptyState}><ActivityIndicator color={Colors.primary} /></View>
+        )}
+        {!isLoading && filtered.length === 0 && (
           <View style={styles.emptyState}>
             <Text style={styles.emptyText}>Nenhuma ordem encontrada.</Text>
           </View>
         )}
 
         {filtered.map(ordem => {
-          const st = ESTADO_STYLES[ordem.estado];
+          const st       = ESTADO_STYLES[ordem.status] ?? {bg: Colors.gray400};
+          const label    = ESTADO_LABEL[ordem.status] ?? ordem.status;
+          const prio     = PRIORIDADE_LABEL[ordem.prioridade] ?? 'Normal';
           const expanded = expandedId === ordem.id;
-          const editing = editingId === ordem.id;
+          const editing  = editingId === ordem.id;
 
           return (
             <View key={ordem.id} style={[styles.card, {borderLeftColor: st.bg}]}>
-              {/* Card header */}
               <TouchableOpacity
                 style={styles.cardHeader}
                 onPress={() => setExpandedId(expanded ? null : ordem.id)}
                 activeOpacity={0.85}>
                 <View style={styles.cardHeaderLeft}>
                   <View style={styles.cardTopRow}>
-                    <Text style={styles.cardRef}>{ordem.ref}</Text>
-                    <View style={[styles.prioChip, {backgroundColor: PRIORIDADE_COLORS[ordem.prioridade] + '22'}]}>
-                      <Text style={[styles.prioText, {color: PRIORIDADE_COLORS[ordem.prioridade]}]}>{ordem.prioridade}</Text>
+                    <Text style={styles.cardRef}>{ordem.referencia}</Text>
+                    <View style={[styles.prioChip, {backgroundColor: (PRIORIDADE_COLORS[prio] ?? Colors.gray400) + '22'}]}>
+                      <Text style={[styles.prioText, {color: PRIORIDADE_COLORS[prio] ?? Colors.gray400}]}>{prio}</Text>
                     </View>
                   </View>
-                  <Text style={styles.cardNome}>{ordem.nome}</Text>
+                  <Text style={styles.cardNome}>{ordem.descricao}</Text>
                   <Text style={styles.cardCliente}>{ordem.cliente}</Text>
                 </View>
                 <View style={styles.cardHeaderRight}>
-                  <TouchableOpacity
-                    style={[styles.estadoBadge, {backgroundColor: st.bg}]}
-                    onPress={() => setEstadoPickId(ordem.id)}
-                    activeOpacity={0.85}>
-                    <Text style={styles.estadoText}>{ordem.estado}</Text>
-                  </TouchableOpacity>
+                  {canEdit ? (
+                    <TouchableOpacity
+                      style={[styles.estadoBadge, {backgroundColor: st.bg}]}
+                      onPress={() => setEstadoPickId(ordem.id)}
+                      activeOpacity={0.85}>
+                      <Text style={styles.estadoText}>{label}</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={[styles.estadoBadge, {backgroundColor: st.bg}]}>
+                      <Text style={styles.estadoText}>{label}</Text>
+                    </View>
+                  )}
                   <Text style={styles.chevron}>{expanded ? '▲' : '▼'}</Text>
                 </View>
               </TouchableOpacity>
 
-              {/* Expanded details */}
               {expanded && !editing && (
                 <View style={styles.cardBody}>
                   <View style={styles.detailRow}>
@@ -231,32 +278,32 @@ export const PlaneamentoScreen: React.FC = () => {
                     </View>
                     <View style={styles.detailField}>
                       <Text style={styles.detailLabel}>ENTREGA</Text>
-                      <Text style={styles.detailValue}>{toDate(ordem.dataFim)}</Text>
+                      <Text style={styles.detailValue}>{toDate(ordem.dataFimPrevista)}</Text>
                     </View>
                     <View style={styles.detailField}>
                       <Text style={styles.detailLabel}>RESPONSÁVEL</Text>
                       <Text style={styles.detailValue}>{ordem.responsavel || '—'}</Text>
                     </View>
                   </View>
-                  <View style={styles.cardActions}>
-                    <TouchableOpacity style={styles.editBtn} onPress={() => startEdit(ordem)} activeOpacity={0.85}>
-                      <Pencil size={12} color={NAVY} />
-                      <Text style={styles.editBtnText}>Editar</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.deleteBtn} onPress={() => setDeleteId(ordem.id)} activeOpacity={0.85}>
-                      <Trash2 size={12} color={Colors.danger} />
-                      <Text style={styles.deleteBtnText}>Eliminar</Text>
-                    </TouchableOpacity>
-                  </View>
+                  {canEdit && (
+                    <View style={styles.cardActions}>
+                      <TouchableOpacity style={styles.editBtn} onPress={() => startEdit(ordem)} activeOpacity={0.85}>
+                        <Pencil size={12} color={NAVY} />
+                        <Text style={styles.editBtnText}>Editar</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.deleteBtn} onPress={() => setDeleteId(ordem.id)} activeOpacity={0.85}>
+                        <Trash2 size={12} color={Colors.danger} />
+                        <Text style={styles.deleteBtnText}>Eliminar</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
               )}
 
-              {/* Edit form */}
               {expanded && editing && (
                 <View style={styles.cardBody}>
                   {([
                     {label: 'NOME DA OBRA', key: 'nome',        isDate: false},
-                    {label: 'CLIENTE',      key: 'cliente',     isDate: false},
                     {label: 'RESPONSÁVEL',  key: 'responsavel', isDate: false},
                     {label: 'DATA INÍCIO',  key: 'dataInicio',  isDate: true},
                     {label: 'DATA FIM',     key: 'dataFim',     isDate: true},
@@ -298,17 +345,17 @@ export const PlaneamentoScreen: React.FC = () => {
 
       <BottomNavBar />
 
-      {/* Estado picker modal */}
+      {/* Estado picker */}
       <Modal visible={!!estadoPickId} transparent animationType="fade" onRequestClose={() => setEstadoPickId(null)}>
         <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setEstadoPickId(null)}>
           <View style={styles.estadoMenu}>
             <View style={styles.estadoMenuHeader}>
               <Text style={styles.estadoMenuTitle}>Alterar Estado</Text>
             </View>
-            {ESTADO_OPTIONS.map(opt => {
-              const current = ordens.find(o => o.id === estadoPickId)?.estado;
+            {DB_ESTADOS.map(opt => {
+              const current = ordens.find(o => o.id === estadoPickId)?.status;
               const isActive = current === opt;
-              const optSt = ESTADO_STYLES[opt];
+              const optSt = ESTADO_STYLES[opt] ?? {bg: Colors.gray400};
               return (
                 <TouchableOpacity
                   key={opt}
@@ -316,7 +363,9 @@ export const PlaneamentoScreen: React.FC = () => {
                   onPress={() => estadoPickId && handleEstadoChange(estadoPickId, opt)}
                   activeOpacity={0.85}>
                   <View style={[styles.estadoDot, {backgroundColor: optSt.bg}]} />
-                  <Text style={[styles.estadoItemText, isActive && {color: NAVY, fontFamily: 'Exo2_700Bold'}]}>{opt}</Text>
+                  <Text style={[styles.estadoItemText, isActive && {color: NAVY, fontFamily: 'Exo2_700Bold'}]}>
+                    {ESTADO_LABEL[opt] ?? opt}
+                  </Text>
                 </TouchableOpacity>
               );
             })}
@@ -324,7 +373,7 @@ export const PlaneamentoScreen: React.FC = () => {
         </TouchableOpacity>
       </Modal>
 
-      {/* Delete confirm modal */}
+      {/* Delete confirm */}
       <Modal visible={!!deleteId} transparent animationType="fade" onRequestClose={() => setDeleteId(null)}>
         <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setDeleteId(null)}>
           <View style={styles.confirmBox} onStartShouldSetResponder={() => true}>
@@ -332,9 +381,8 @@ export const PlaneamentoScreen: React.FC = () => {
             <Text style={styles.confirmSub}>
               Tem a certeza que pretende eliminar{' '}
               <Text style={{fontFamily: 'Exo2_700Bold'}}>
-                {ordens.find(o => o.id === deleteId)?.ref}
-              </Text>
-              ? Esta ação não pode ser revertida.
+                {ordens.find(o => o.id === deleteId)?.referencia}
+              </Text>? Esta ação não pode ser revertida.
             </Text>
             <View style={styles.confirmActions}>
               <TouchableOpacity style={styles.confirmCancelBtn} onPress={() => setDeleteId(null)} activeOpacity={0.85}>
@@ -348,7 +396,7 @@ export const PlaneamentoScreen: React.FC = () => {
         </TouchableOpacity>
       </Modal>
 
-      {/* Nova OP modal */}
+      {/* Nova OP */}
       <Modal visible={showNova} transparent animationType="slide" onRequestClose={() => setShowNova(false)}>
         <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setShowNova(false)}>
           <ScrollView style={styles.novaScroll} contentContainerStyle={styles.novaScrollContent} scrollEnabled={false}>
@@ -359,10 +407,8 @@ export const PlaneamentoScreen: React.FC = () => {
                   <X size={20} color={Colors.gray500} />
                 </TouchableOpacity>
               </View>
-
               {([
                 {label: 'NOME DA OBRA *', key: 'nome',        placeholder: 'Ex: Sinalética exterior', isDate: false},
-                {label: 'CLIENTE',        key: 'cliente',     placeholder: 'Nome do cliente',          isDate: false},
                 {label: 'RESPONSÁVEL',    key: 'responsavel', placeholder: 'Nome do responsável',      isDate: false},
                 {label: 'DATA INÍCIO',    key: 'dataInicio',  placeholder: '',                         isDate: true},
                 {label: 'DATA FIM PREV.', key: 'dataFim',     placeholder: '',                         isDate: true},
@@ -386,23 +432,20 @@ export const PlaneamentoScreen: React.FC = () => {
                   )}
                 </View>
               ))}
-
-              {/* Prioridade */}
               <View style={styles.novaField}>
                 <Text style={styles.novaLabel}>PRIORIDADE</Text>
                 <View style={styles.prioRow}>
-                  {(['Normal', 'Média', 'Alta'] as const).map(p => (
+                  {([['media','Média'], ['alta','Alta'], ['baixa','Normal']] as [string,string][]).map(([db, lbl]) => (
                     <TouchableOpacity
-                      key={p}
-                      style={[styles.prioOption, nova.prioridade === p && {borderColor: PRIORIDADE_COLORS[p], backgroundColor: PRIORIDADE_COLORS[p] + '18'}]}
-                      onPress={() => setNova(prev => ({...prev, prioridade: p}))}
+                      key={db}
+                      style={[styles.prioOption, nova.prioridade === db && {borderColor: PRIORIDADE_COLORS[lbl], backgroundColor: PRIORIDADE_COLORS[lbl] + '18'}]}
+                      onPress={() => setNova(p => ({...p, prioridade: db as any}))}
                       activeOpacity={0.85}>
-                      <Text style={[styles.prioOptionText, nova.prioridade === p && {color: PRIORIDADE_COLORS[p]}]}>{p}</Text>
+                      <Text style={[styles.prioOptionText, nova.prioridade === db && {color: PRIORIDADE_COLORS[lbl]}]}>{lbl}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
               </View>
-
               <TouchableOpacity style={styles.novaSaveBtn} onPress={addOrdem} activeOpacity={0.85}>
                 <Text style={styles.novaSaveBtnText}>CRIAR ORDEM</Text>
               </TouchableOpacity>
@@ -418,17 +461,9 @@ const styles = StyleSheet.create({
   container: {flex: 1, backgroundColor: Colors.background},
 
   toolbar: {flexDirection: 'row', gap: Spacing.sm, paddingHorizontal: Spacing.base, paddingTop: Spacing.md, paddingBottom: Spacing.sm, alignItems: 'center'},
-  searchBox: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
-    borderWidth: 2, borderColor: NAVY, borderRadius: BorderRadius.full,
-    backgroundColor: '#fff', paddingHorizontal: Spacing.md,
-  },
+  searchBox: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, borderWidth: 2, borderColor: NAVY, borderRadius: BorderRadius.full, backgroundColor: '#fff', paddingHorizontal: Spacing.md},
   searchInput: {flex: 1, paddingVertical: Spacing.sm, fontSize: 11, color: Colors.gray700, fontFamily: 'Exo2_400Regular'},
-  filterBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    borderWidth: 1.5, borderColor: NAVY, borderRadius: BorderRadius.full,
-    backgroundColor: '#fff', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
-  },
+  filterBtn: {flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1.5, borderColor: NAVY, borderRadius: BorderRadius.full, backgroundColor: '#fff', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm},
   filterBtnText: {fontSize: 11, fontFamily: 'Exo2_700Bold', color: NAVY},
   novaBtn: {backgroundColor: GREEN, width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center'},
 
@@ -436,12 +471,7 @@ const styles = StyleSheet.create({
   countText: {fontSize: 11, fontFamily: 'Exo2_700Bold', color: Colors.gray600, letterSpacing: 1},
 
   overlay: {flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center', padding: Spacing.xl},
-
-  filterMenu: {
-    backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: Colors.border,
-    overflow: 'hidden', minWidth: 180, shadowColor: '#000', shadowOffset: {width: 0, height: 4},
-    shadowOpacity: 0.12, shadowRadius: 16, elevation: 8,
-  },
+  filterMenu: {backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden', minWidth: 180, shadowColor: '#000', shadowOffset: {width: 0, height: 4}, shadowOpacity: 0.12, shadowRadius: 16, elevation: 8},
   filterItem: {padding: Spacing.md},
   filterItemActive: {backgroundColor: '#f0f4ff'},
   filterItemText: {fontSize: FontSize.sm, fontFamily: 'Exo2_400Regular', color: Colors.gray700},
@@ -452,11 +482,7 @@ const styles = StyleSheet.create({
   emptyState: {paddingTop: 40, alignItems: 'center'},
   emptyText: {color: Colors.gray400, fontSize: FontSize.sm, fontFamily: 'Exo2_400Regular'},
 
-  card: {
-    backgroundColor: '#fff', borderRadius: 12, borderLeftWidth: 4,
-    shadowColor: '#000', shadowOffset: {width: 0, height: 1},
-    shadowOpacity: 0.07, shadowRadius: 4, elevation: 2, overflow: 'hidden',
-  },
+  card: {backgroundColor: '#fff', borderRadius: 12, borderLeftWidth: 4, shadowColor: '#000', shadowOffset: {width: 0, height: 1}, shadowOpacity: 0.07, shadowRadius: 4, elevation: 2, overflow: 'hidden'},
   cardHeader: {flexDirection: 'row', alignItems: 'flex-start', padding: Spacing.md, gap: Spacing.sm},
   cardHeaderLeft: {flex: 1},
   cardTopRow: {flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: 3},
@@ -471,12 +497,10 @@ const styles = StyleSheet.create({
   chevron: {fontSize: 11, color: Colors.gray400},
 
   cardBody: {borderTopWidth: 1, borderTopColor: Colors.gray50, padding: Spacing.md, backgroundColor: Colors.gray50, gap: Spacing.sm},
-
   detailRow: {flexDirection: 'row', gap: Spacing.sm},
   detailField: {flex: 1},
   detailLabel: {fontSize: 9, fontFamily: 'Exo2_700Bold', color: Colors.gray400, letterSpacing: 0.5, marginBottom: 2},
   detailValue: {fontSize: 12, color: Colors.gray700, fontFamily: 'Exo2_600SemiBold'},
-
   cardActions: {flexDirection: 'row', gap: Spacing.sm, paddingTop: Spacing.xs},
   editBtn: {flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1.5, borderColor: NAVY, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.md, paddingVertical: 5},
   editBtnText: {fontSize: 11, fontFamily: 'Exo2_700Bold', color: NAVY},
@@ -492,12 +516,7 @@ const styles = StyleSheet.create({
   saveBtn: {flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: NAVY, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.md, paddingVertical: 6},
   saveBtnText: {fontSize: 11, fontFamily: 'Exo2_700Bold', color: '#fff'},
 
-  // Estado picker
-  estadoMenu: {
-    backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
-    overflow: 'hidden', minWidth: 220, shadowColor: '#000',
-    shadowOffset: {width: 0, height: 6}, shadowOpacity: 0.18, shadowRadius: 24, elevation: 10,
-  },
+  estadoMenu: {backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden', minWidth: 220, shadowColor: '#000', shadowOffset: {width: 0, height: 6}, shadowOpacity: 0.18, shadowRadius: 24, elevation: 10},
   estadoMenuHeader: {padding: Spacing.md, borderBottomWidth: 1, borderBottomColor: Colors.gray50},
   estadoMenuTitle: {fontSize: 12, fontFamily: 'Exo2_700Bold', color: NAVY},
   estadoItem: {flexDirection: 'row', alignItems: 'center', gap: 8, padding: Spacing.md},
@@ -505,11 +524,7 @@ const styles = StyleSheet.create({
   estadoDot: {width: 8, height: 8, borderRadius: 4, flexShrink: 0},
   estadoItemText: {fontSize: FontSize.sm, fontFamily: 'Exo2_400Regular', color: Colors.gray700},
 
-  // Delete confirm
-  confirmBox: {
-    backgroundColor: '#fff', borderRadius: 16, padding: Spacing.lg, width: '100%',
-    shadowColor: '#000', shadowOffset: {width: 0, height: 16}, shadowOpacity: 0.2, shadowRadius: 48, elevation: 20,
-  },
+  confirmBox: {backgroundColor: '#fff', borderRadius: 16, padding: Spacing.lg, width: '100%', shadowColor: '#000', shadowOffset: {width: 0, height: 16}, shadowOpacity: 0.2, shadowRadius: 48, elevation: 20},
   confirmTitle: {fontFamily: 'Exo2_700Bold', fontSize: 15, color: Colors.gray900, marginBottom: Spacing.sm},
   confirmSub: {fontSize: FontSize.sm, color: Colors.gray600, fontFamily: 'Exo2_400Regular', lineHeight: 20, marginBottom: Spacing.lg},
   confirmActions: {flexDirection: 'row', gap: Spacing.sm},
@@ -518,13 +533,9 @@ const styles = StyleSheet.create({
   confirmDeleteBtn: {flex: 1, backgroundColor: Colors.danger, borderRadius: BorderRadius.full, paddingVertical: 10, alignItems: 'center'},
   confirmDeleteText: {fontFamily: 'Exo2_700Bold', fontSize: FontSize.sm, color: '#fff'},
 
-  // Nova OP
   novaScroll: {flex: 1, width: '100%'},
   novaScrollContent: {flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: Spacing.xl},
-  novaBox: {
-    backgroundColor: '#fff', borderRadius: 16, padding: Spacing.lg, width: '100%',
-    shadowColor: '#000', shadowOffset: {width: 0, height: 16}, shadowOpacity: 0.2, shadowRadius: 48, elevation: 20,
-  },
+  novaBox: {backgroundColor: '#fff', borderRadius: 16, padding: Spacing.lg, width: '100%', shadowColor: '#000', shadowOffset: {width: 0, height: 16}, shadowOpacity: 0.2, shadowRadius: 48, elevation: 20},
   novaHeader: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.base},
   novaTitle: {fontFamily: 'Exo2_700Bold', fontSize: 14, color: NAVY},
   novaField: {marginBottom: Spacing.sm},
