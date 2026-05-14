@@ -2,8 +2,7 @@ import React from 'react';
 import {View, Text, StyleSheet, TouchableOpacity, ScrollView} from 'react-native';
 import {useRouter} from 'expo-router';
 import {
-  CalendarClock, Cog, ShieldCheck, Truck, Wrench,
-  Package, ClipboardList, RefreshCw, PenLine, CheckSquare2,
+  CalendarClock, Cog, ShieldCheck, Truck, Wrench, Package,
 } from 'lucide-react-native';
 import {useAppSelector} from '../../store';
 import {Colors, Spacing, FontSize, BorderRadius} from '../../theme';
@@ -12,7 +11,6 @@ import {AppHeader, BottomNavBar} from '../../components/common';
 
 const ORANGE = '#ff7700';
 const NAVY   = '#0d1b4b';
-const BLUE   = '#0094ff';
 
 interface Module {
   name: string;
@@ -22,12 +20,12 @@ interface Module {
 }
 
 const ALL_MODULES: Module[] = [
-  {name: 'PLANEAMENTO',       tab: '/planeamento',                 roles: ['direcao', 'planeamento'],         Icon: CalendarClock},
-  {name: 'PRODUÇÃO',          tab: '/(tabs)/orders',               roles: ['direcao', 'producao'],            Icon: Cog},
-  {name: 'QUALIDADE',         tab: '/quality',                     roles: ['direcao', 'qualidade'],           Icon: ShieldCheck},
-  {name: 'EXPEDIÇÃO',         tab: '/expedition/atualizar-estado', roles: ['direcao', 'expedicao'],           Icon: Truck},
-  {name: 'MONTAGEM',          tab: '/assembly/montagens',          roles: ['direcao', 'montagem'],            Icon: Wrench},
-  {name: 'INVENTÁRIO',        tab: '/(tabs)/materials',            roles: ['direcao', 'armazem', 'producao'], Icon: Package},
+  {name: 'PLANEAMENTO', tab: '/planeamento',                 roles: ['direcao', 'planeamento'],         Icon: CalendarClock},
+  {name: 'PRODUÇÃO',    tab: '/(tabs)/orders',               roles: ['direcao', 'producao'],            Icon: Cog},
+  {name: 'QUALIDADE',   tab: '/quality',                     roles: ['direcao', 'qualidade'],           Icon: ShieldCheck},
+  {name: 'EXPEDIÇÃO',   tab: '/expedition/atualizar-estado', roles: ['direcao', 'expedicao'],           Icon: Truck},
+  {name: 'MONTAGEM',    tab: '/assembly/montagens',          roles: ['direcao', 'montagem'],            Icon: Wrench},
+  {name: 'INVENTÁRIO',  tab: '/(tabs)/materials',            roles: ['direcao', 'armazem', 'producao'], Icon: Package},
 ];
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -40,47 +38,14 @@ const ROLE_LABELS: Record<UserRole, string> = {
   montagem:    'Montagem',
 };
 
-const SIMPLE_HOME_ROLES: UserRole[] = ['producao', 'montagem', 'qualidade', 'expedicao', 'armazem', 'planeamento'];
-
-interface SimpleButton {
-  label: string;
-  route: string;
-  Icon: React.FC<{size: number; color: string; strokeWidth?: number}>;
-  primary?: boolean;
-}
-
-const SIMPLE_BUTTONS: Record<UserRole, SimpleButton[]> = {
-  producao: [
-    {label: 'CONSULTAR ORDENS DE PRODUÇÃO', route: '/(tabs)/orders',           Icon: ClipboardList, primary: true},
-    {label: 'ATUALIZAR ESTADO DA OBRA',     route: '/production/estado-obra',  Icon: RefreshCw},
-  ],
-  montagem: [
-    {label: 'CONSULTAR ORDENS DE MONTAGEM', route: '/assembly/montagens',      Icon: ClipboardList, primary: true},
-    {label: 'REGISTAR MONTAGEM',            route: '/assembly/registar',       Icon: PenLine},
-  ],
-  qualidade: [
-    {label: 'VERIFICAR ORDENS DE PRODUÇÃO', route: '/(tabs)/orders',           Icon: ShieldCheck,   primary: true},
-    {label: 'CONSULTAR VERIFICAÇÕES',       route: '/quality/verificacoes',    Icon: CheckSquare2},
-  ],
-  expedicao: [
-    {label: 'GUIAS DE TRANSPORTE',          route: '/expedition/atualizar-estado', Icon: Truck,     primary: true},
-  ],
-  armazem: [
-    {label: 'INVENTÁRIO E PEDIDOS',         route: '/(tabs)/materials',        Icon: Package,       primary: true},
-  ],
-  planeamento: [
-    {label: 'CONSULTAR ORDENS DE PRODUÇÃO', route: '/planeamento',             Icon: CalendarClock, primary: true},
-  ],
-  direcao: [],
-};
-
 export const DashboardScreen: React.FC = () => {
   const router = useRouter();
   const user = useAppSelector(s => s.auth.user);
   const role = (user?.perfil ?? 'producao') as UserRole;
 
   const visibleModules = ALL_MODULES.filter(m => m.roles.includes(role));
-  const isSimpleHome = SIMPLE_HOME_ROLES.includes(role);
+  const padded = [...visibleModules];
+  if (padded.length % 2 !== 0) padded.push(null as any);
 
   const getDisplayName = () => {
     if (!user) return 'Utilizador';
@@ -91,57 +56,14 @@ export const DashboardScreen: React.FC = () => {
   const rawFirst = user?.nome?.split(' ')[0] ?? '';
   const firstName = user?.nome?.includes(' ') ? rawFirst : (ROLE_LABELS[role] ?? (rawFirst || 'Utilizador'));
 
-  const renderHeader = () => (
-    <AppHeader
-      section="INÍCIO"
-      userName={getDisplayName()}
-      onUserPress={() => router.push('/(tabs)/profile')}
-      onLogoPress={() => router.push('/(tabs)')}
-    />
-  );
-
-  // Simple home for operational profiles
-  if (isSimpleHome) {
-    const buttons = SIMPLE_BUTTONS[role] ?? [];
-    return (
-      <View style={styles.container}>
-        {renderHeader()}
-
-        <View style={styles.welcomeBar}>
-          <Text style={styles.welcomeText}>Olá, {firstName}</Text>
-          <View style={styles.rolePill}>
-            <Text style={styles.roleText}>{ROLE_LABELS[role]}</Text>
-          </View>
-        </View>
-
-        <View style={styles.simpleContent}>
-          {buttons.map((btn, i) => {
-            const BtnIcon = btn.Icon;
-            return (
-              <TouchableOpacity
-                key={i}
-                style={[styles.simpleBtn, btn.primary ? styles.simpleBtnPrimary : styles.simpleBtnSecondary]}
-                onPress={() => router.push(btn.route as any)}
-                activeOpacity={0.85}>
-                <BtnIcon size={28} color="#fff" strokeWidth={2} />
-                <Text style={styles.simpleBtnText}>{btn.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        <BottomNavBar isHome />
-      </View>
-    );
-  }
-
-  // Admin / direcao — 2-column icon grid
-  const padded = [...visibleModules];
-  if (padded.length % 2 !== 0) padded.push(null as any);
-
   return (
     <View style={styles.container}>
-      {renderHeader()}
+      <AppHeader
+        section="INÍCIO"
+        userName={getDisplayName()}
+        onUserPress={() => router.push('/(tabs)/profile')}
+        onLogoPress={() => router.push('/(tabs)')}
+      />
 
       <View style={styles.welcomeBar}>
         <Text style={styles.welcomeText}>Olá, {firstName}</Text>
@@ -186,7 +108,6 @@ export const DashboardScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {flex: 1, backgroundColor: Colors.background},
 
-  // Welcome bar
   welcomeBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -217,7 +138,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
 
-  // Scroll
   scroll: {
     padding: Spacing.base,
     paddingBottom: Spacing['3xl'],
@@ -230,7 +150,6 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
 
-  // 2-column grid
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -246,7 +165,6 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     borderLeftWidth: 4,
     borderLeftColor: ORANGE,
-    // shadow
     shadowColor: '#000',
     shadowOffset: {width: 0, height: 2},
     shadowOpacity: 0.07,
@@ -276,43 +194,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  // Simple home
-  simpleContent: {
-    flex: 1,
-    padding: Spacing.xl,
-    gap: Spacing.base,
-    justifyContent: 'center',
-  },
-  simpleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.base,
-    borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.lg,
-    paddingHorizontal: Spacing.xl,
-    // shadow
-    shadowColor: '#000',
-    shadowOffset: {width: 0, height: 3},
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  simpleBtnPrimary: {
-    backgroundColor: ORANGE,
-  },
-  simpleBtnSecondary: {
-    backgroundColor: NAVY,
-  },
-  simpleBtnText: {
-    flex: 1,
-    color: '#fff',
-    fontFamily: 'Exo2_700Bold',
-    fontSize: FontSize.base,
-    letterSpacing: 0.5,
-    lineHeight: 22,
-  },
-
-  // Admin button
   adminBtn: {
     marginTop: Spacing.lg,
     backgroundColor: ORANGE,
