@@ -32,7 +32,6 @@ const ALL_MODULES: Module[] = [
 
 const ROLE_LABELS: Record<UserRole, string> = {
   direcao:     'Direção',
-  rh:          'Recursos Humanos',
   planeamento: 'Planeamento',
   armazem:     'Armazém',
   producao:    'Produção',
@@ -69,7 +68,6 @@ const SIMPLE_BUTTONS: Record<UserRole, SimpleButton[]> = {
   armazem: [
     {label: 'INVENTÁRIO E PEDIDOS',         route: '/(tabs)/materials',        Icon: Package,       primary: true},
   ],
-  rh: [],
   planeamento: [
     {label: 'CONSULTAR ORDENS DE PRODUÇÃO', route: '/planeamento',             Icon: CalendarClock, primary: true},
   ],
@@ -91,7 +89,7 @@ export const DashboardScreen: React.FC = () => {
   };
 
   const rawFirst = user?.nome?.split(' ')[0] ?? '';
-  const firstName = user?.nome?.includes(' ') ? rawFirst : (ROLE_LABELS[role] ?? rawFirst || 'Utilizador');
+  const firstName = user?.nome?.includes(' ') ? rawFirst : (ROLE_LABELS[role] ?? (rawFirst || 'Utilizador'));
 
   const renderHeader = () => (
     <AppHeader
