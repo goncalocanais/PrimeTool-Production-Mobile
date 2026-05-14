@@ -13,14 +13,14 @@ const initialState: AuthState = {
 
 // Perfis mock para validar credenciais até haver auth real no backend.
 // O perfil correto vem dos grupos do core_user na base de dados.
-const MOCK_CREDENTIALS: Record<string, {password: string; perfil: UserRole}> = {
-  'direcao@primetool.pt':    {password: '123456', perfil: 'direcao'},
-  'planeamento@primetool.pt':{password: '123456', perfil: 'planeamento'},
-  'armazem@primetool.pt':    {password: '123456', perfil: 'armazem'},
-  'producao@primetool.pt':   {password: '123456', perfil: 'producao'},
-  'qualidade@primetool.pt':  {password: '123456', perfil: 'qualidade'},
-  'expedicao@primetool.pt':  {password: '123456', perfil: 'expedicao'},
-  'montagem@primetool.pt':   {password: '123456', perfil: 'montagem'},
+const MOCK_CREDENTIALS: Record<string, {password: string; perfil: UserRole; nome: string}> = {
+  'direcao@primetool.pt':    {password: '123456', perfil: 'direcao',     nome: 'Direção'},
+  'planeamento@primetool.pt':{password: '123456', perfil: 'planeamento', nome: 'Planeamento'},
+  'armazem@primetool.pt':    {password: '123456', perfil: 'armazem',     nome: 'Armazém'},
+  'producao@primetool.pt':   {password: '123456', perfil: 'producao',    nome: 'Produção'},
+  'qualidade@primetool.pt':  {password: '123456', perfil: 'qualidade',   nome: 'Qualidade'},
+  'expedicao@primetool.pt':  {password: '123456', perfil: 'expedicao',   nome: 'Expedição'},
+  'montagem@primetool.pt':   {password: '123456', perfil: 'montagem',    nome: 'Montagem'},
 };
 
 async function fetchUserFromDB(email: string, fallbackPerfil: UserRole): Promise<User | null> {
@@ -76,7 +76,7 @@ export const login = createAsyncThunk(
       const dbUser = await fetchUserFromDB(email.toLowerCase(), mock.perfil);
       const user: User = dbUser ?? {
         id: 0,
-        nome: email.split('@')[0],
+        nome: mock.nome,
         email,
         cargo: '—',
         departamento: '—',

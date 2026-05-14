@@ -12,8 +12,7 @@ const ALL_TABS = [
   { name: 'materials', label: 'Armazém', icon: '📦', roles: ['direcao', 'armazem', 'producao'] },
   { name: 'quality', label: 'Qualidade', icon: '✅', roles: ['direcao', 'qualidade'] },
   { name: 'expedition', label: 'Expedição', icon: '🚚', roles: ['direcao', 'expedicao'] },
-  { name: 'hr', label: 'RH', icon: '👥', roles: ['direcao', 'rh'] },
-  { name: 'profile', label: 'Perfil', icon: '👤', roles: ['direcao', 'rh', 'planeamento', 'armazem', 'producao', 'qualidade', 'expedicao', 'montagem'] },
+  { name: 'profile', label: 'Perfil', icon: '👤', roles: ['direcao', 'planeamento', 'armazem', 'producao', 'qualidade', 'expedicao', 'montagem'] },
 ] as const;
 
 export default function TabsLayout() {

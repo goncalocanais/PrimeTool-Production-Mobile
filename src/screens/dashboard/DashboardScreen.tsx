@@ -3,8 +3,7 @@ import {View, Text, StyleSheet, TouchableOpacity, ScrollView} from 'react-native
 import {useRouter} from 'expo-router';
 import {
   CalendarClock, Cog, ShieldCheck, Truck, Wrench,
-  Package, BarChart2, ShoppingBag, Users,
-  ClipboardList, RefreshCw, PenLine, CheckSquare2, ShoppingCart,
+  Package, ClipboardList, RefreshCw, PenLine, CheckSquare2,
 } from 'lucide-react-native';
 import {useAppSelector} from '../../store';
 import {Colors, Spacing, FontSize, BorderRadius} from '../../theme';
@@ -29,9 +28,6 @@ const ALL_MODULES: Module[] = [
   {name: 'EXPEDIÇÃO',         tab: '/expedition/atualizar-estado', roles: ['direcao', 'expedicao'],           Icon: Truck},
   {name: 'MONTAGEM',          tab: '/assembly/montagens',          roles: ['direcao', 'montagem'],            Icon: Wrench},
   {name: 'INVENTÁRIO',        tab: '/(tabs)/materials',            roles: ['direcao', 'armazem', 'producao'], Icon: Package},
-  {name: 'RELATÓRIOS',        tab: '/relatorios',                  roles: ['direcao'],                        Icon: BarChart2},
-  {name: 'FORNECEDORES',      tab: '/suppliers/fornecedores',      roles: ['direcao', 'armazem'],             Icon: ShoppingBag},
-  {name: 'REC. HUMANOS',      tab: '/(tabs)/hr',                   roles: ['direcao', 'rh'],                  Icon: Users},
 ];
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -45,7 +41,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
   montagem:    'Montagem',
 };
 
-const SIMPLE_HOME_ROLES: UserRole[] = ['producao', 'montagem', 'qualidade', 'expedicao', 'armazem', 'rh', 'planeamento'];
+const SIMPLE_HOME_ROLES: UserRole[] = ['producao', 'montagem', 'qualidade', 'expedicao', 'armazem', 'planeamento'];
 
 interface SimpleButton {
   label: string;
@@ -73,9 +69,7 @@ const SIMPLE_BUTTONS: Record<UserRole, SimpleButton[]> = {
   armazem: [
     {label: 'INVENTÁRIO E PEDIDOS',         route: '/(tabs)/materials',        Icon: Package,       primary: true},
   ],
-  rh: [
-    {label: 'GERIR COLABORADORES',          route: '/(tabs)/hr',               Icon: Users,         primary: true},
-  ],
+  rh: [],
   planeamento: [
     {label: 'CONSULTAR ORDENS DE PRODUÇÃO', route: '/planeamento',             Icon: CalendarClock, primary: true},
   ],
