@@ -20,12 +20,12 @@ interface Module {
 }
 
 const ALL_MODULES: Module[] = [
-  {name: 'PLANEAMENTO', tab: '/planeamento',                 roles: ['direcao', 'planeamento'],         Icon: CalendarClock},
-  {name: 'PRODUÇÃO',    tab: '/(tabs)/orders',               roles: ['direcao', 'producao'],            Icon: Cog},
-  {name: 'QUALIDADE',   tab: '/quality',                     roles: ['direcao', 'qualidade'],           Icon: ShieldCheck},
-  {name: 'EXPEDIÇÃO',   tab: '/expedition/atualizar-estado', roles: ['direcao', 'expedicao'],           Icon: Truck},
-  {name: 'MONTAGEM',    tab: '/assembly/montagens',          roles: ['direcao', 'montagem'],            Icon: Wrench},
-  {name: 'INVENTÁRIO',  tab: '/(tabs)/materials',            roles: ['direcao', 'armazem', 'producao'], Icon: Package},
+  {name: 'PLANEAMENTO', tab: '/planeamento',                 roles: ['direcao', 'planeamento'],                                    Icon: CalendarClock},
+  {name: 'PRODUÇÃO',    tab: '/(tabs)/orders',               roles: ['direcao', 'planeamento', 'producao', 'qualidade', 'expedicao', 'montagem'], Icon: Cog},
+  {name: 'QUALIDADE',   tab: '/quality',                     roles: ['direcao', 'qualidade'],                                      Icon: ShieldCheck},
+  {name: 'EXPEDIÇÃO',   tab: '/expedition/atualizar-estado', roles: ['direcao', 'expedicao'],                                      Icon: Truck},
+  {name: 'MONTAGEM',    tab: '/assembly/montagens',          roles: ['direcao', 'montagem'],                                       Icon: Wrench},
+  {name: 'INVENTÁRIO',  tab: '/(tabs)/materials',            roles: ['direcao', 'armazem', 'producao'],                            Icon: Package},
 ];
 
 const ROLE_LABELS: Record<UserRole, string> = {
