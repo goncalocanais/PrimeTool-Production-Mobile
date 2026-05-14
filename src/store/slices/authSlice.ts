@@ -11,6 +11,11 @@ const initialState: AuthState = {
   error: null,
 };
 
+const PERFIL_DISPLAY: Record<string, string> = {
+  direcao: 'Direção', planeamento: 'Planeamento', armazem: 'Armazém',
+  producao: 'Produção', qualidade: 'Qualidade', expedicao: 'Expedição', montagem: 'Montagem',
+};
+
 // Perfis mock para validar credenciais até haver auth real no backend.
 // O perfil correto vem dos grupos do core_user na base de dados.
 const MOCK_CREDENTIALS: Record<string, {password: string; perfil: UserRole; nome: string}> = {
@@ -50,9 +55,10 @@ async function fetchUserFromDB(email: string, fallbackPerfil: UserRole): Promise
     const cargoObj = Array.isArray(row.cargo_obj) ? row.cargo_obj[0] : row.cargo_obj;
     const deptObj = Array.isArray(row.departamento_obj) ? row.departamento_obj[0] : row.departamento_obj;
 
+    const nomeRaw = `${row.first_name} ${row.last_name}`.trim();
     return {
       id: row.id,
-      nome: `${row.first_name} ${row.last_name}`.trim(),
+      nome: PERFIL_DISPLAY[nomeRaw.toLowerCase()] ?? nomeRaw,
       email: row.email,
       cargo: cargoObj?.nome ?? '—',
       departamento: deptObj?.nome ?? '—',

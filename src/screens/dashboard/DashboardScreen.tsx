@@ -90,7 +90,8 @@ export const DashboardScreen: React.FC = () => {
     return parts.length >= 2 ? `${parts[0]} ${parts[parts.length - 1]}` : parts[0];
   };
 
-  const firstName = user?.nome?.split(' ')[0] ?? 'Utilizador';
+  const rawFirst = user?.nome?.split(' ')[0] ?? '';
+  const firstName = user?.nome?.includes(' ') ? rawFirst : (ROLE_LABELS[role] ?? rawFirst || 'Utilizador');
 
   const renderHeader = () => (
     <AppHeader
