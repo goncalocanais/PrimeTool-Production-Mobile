@@ -26,6 +26,7 @@ const MOCK_CREDENTIALS: Record<string, {password: string; perfil: UserRole; nome
   'qualidade@primetool.pt':  {password: '123456', perfil: 'qualidade',   nome: 'Qualidade'},
   'expedicao@primetool.pt':  {password: '123456', perfil: 'expedicao',   nome: 'Expedição'},
   'montagem@primetool.pt':   {password: '123456', perfil: 'montagem',    nome: 'Montagem'},
+  'teste@primetool.pt':      {password: '123456', perfil: 'direcao',     nome: 'Utilizador Teste'},
 };
 
 async function fetchUserFromDB(email: string, fallbackPerfil: UserRole): Promise<User | null> {

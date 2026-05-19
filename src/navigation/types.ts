@@ -22,8 +22,6 @@ export type MaterialsStackParamList = {
   MaterialDetail: {id: number};
   PedidosMaterialList: undefined;
   CreatePedidoMaterial: {ordemId?: number};
-  PedidosCompraList: undefined;
-  CreatePedidoCompra: undefined;
   MovimentosStock: {materialId?: number};
 };
 
@@ -43,14 +41,6 @@ export type ExpeditionStackParamList = {
   CreateExpedicao: {ordemId?: number};
 };
 
-// HR
-export type HRStackParamList = {
-  ColaboradoresList: undefined;
-  ColaboradorDetail: {id: number};
-  CreateColaborador: undefined;
-  DepartamentosList: undefined;
-};
-
 // Profile
 export type ProfileStackParamList = {
   Profile: undefined;
@@ -64,6 +54,5 @@ export type MainTabParamList = {
   Materials: undefined;
   Quality: undefined;
   Expedition: undefined;
-  HR: undefined;
   Profile: undefined;
 };

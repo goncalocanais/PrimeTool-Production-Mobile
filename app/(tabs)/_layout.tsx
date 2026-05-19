@@ -7,7 +7,7 @@ import { Colors, FontSize } from '../../src/theme';
 const ORANGE = '#E87D28';
 
 const ALL_TABS = [
-  { name: 'index', label: 'Início', icon: '🏠', roles: ['direcao', 'rh', 'planeamento', 'armazem', 'producao', 'qualidade', 'expedicao', 'montagem'] },
+  { name: 'index', label: 'Início', icon: '🏠', roles: ['direcao', 'planeamento', 'armazem', 'producao', 'qualidade', 'expedicao', 'montagem'] },
   { name: 'orders', label: 'OPs', icon: '📋', roles: ['direcao', 'planeamento', 'producao', 'qualidade', 'expedicao', 'montagem'] },
   { name: 'materials', label: 'Armazém', icon: '📦', roles: ['direcao', 'armazem', 'producao'] },
   { name: 'quality', label: 'Qualidade', icon: '✅', roles: ['direcao', 'qualidade'] },

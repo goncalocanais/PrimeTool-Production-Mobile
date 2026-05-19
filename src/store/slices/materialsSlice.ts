@@ -1,11 +1,10 @@
 import {createSlice, createAsyncThunk} from '@reduxjs/toolkit';
-import {Material, PedidoMaterial, PedidoCompra, MovimentoStock} from '../../types';
+import {Material, PedidoMaterial, MovimentoStock} from '../../types';
 import {materialsApi} from '../../api/materials';
 
 interface MaterialsState {
   materials: Material[];
   pedidosMaterial: PedidoMaterial[];
-  pedidosCompra: PedidoCompra[];
   movimentos: MovimentoStock[];
   selectedMaterial: Material | null;
   alertasStockMinimo: Material[];
@@ -16,7 +15,6 @@ interface MaterialsState {
 const initialState: MaterialsState = {
   materials: [],
   pedidosMaterial: [],
-  pedidosCompra: [],
   movimentos: [],
   selectedMaterial: null,
   alertasStockMinimo: [],
@@ -93,17 +91,6 @@ export const registarMovimento = createAsyncThunk(
   },
 );
 
-export const fetchPedidosCompra = createAsyncThunk(
-  'materials/fetchPedidosCompra',
-  async (_arg: void, {rejectWithValue}) => {
-    try {
-      return await materialsApi.getPedidosCompra();
-    } catch (error: any) {
-      return rejectWithValue(error.response?.data?.message || 'Erro ao carregar pedidos de compra');
-    }
-  },
-);
-
 const materialsSlice = createSlice({
   name: 'materials',
   initialState,
@@ -149,9 +136,6 @@ const materialsSlice = createSlice({
         if (matIndex !== -1) {
           state.materials[matIndex].stockAtual = action.payload.quantidadeApos;
         }
-      })
-      .addCase(fetchPedidosCompra.fulfilled, (state, action) => {
-        state.pedidosCompra = action.payload;
       });
   },
 });

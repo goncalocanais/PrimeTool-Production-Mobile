@@ -27,6 +27,7 @@ export const InventarioScreen: React.FC = () => {
   const router   = useRouter();
   const user     = useAppSelector(s => s.auth.user);
   const canManage = ['armazem', 'direcao'].includes(user?.perfil ?? '');
+  const canPedido = ['producao', 'armazem', 'direcao'].includes(user?.perfil ?? '');
 
   const [materiais, setMateriais]   = useState<Material[]>([]);
   const [isLoading, setIsLoading]   = useState(false);
@@ -208,7 +209,6 @@ export const InventarioScreen: React.FC = () => {
 
         {filtered.map(m => {
           const st       = getStockStatus(m);
-          const pct      = Math.min(100, m.stockMaximo > 0 ? (m.stockAtual / m.stockMaximo) * 100 : 0);
           const expanded = expandedId === m.id;
 
           return (
@@ -226,9 +226,6 @@ export const InventarioScreen: React.FC = () => {
                   </View>
                   <Text style={styles.cardNome}>{m.nome}</Text>
                   {m.categoria && <Text style={styles.cardCat}>{m.categoria}</Text>}
-                  <View style={styles.stockBarBg}>
-                    <View style={[styles.stockBarFill, {width: `${pct}%` as any, backgroundColor: st.color}]} />
-                  </View>
                 </View>
                 <View style={styles.cardHeaderRight}>
                   <Text style={[styles.stockNum, {color: st.color}]}>{m.stockAtual}</Text>
@@ -245,18 +242,8 @@ export const InventarioScreen: React.FC = () => {
                       <Text style={styles.bodyValue}>{m.stockMinimo} {m.unidade}</Text>
                     </View>
                     <View style={styles.bodyField}>
-                      <Text style={styles.bodyLabel}>STOCK MÁX.</Text>
-                      <Text style={styles.bodyValue}>{m.stockMaximo} {m.unidade}</Text>
-                    </View>
-                    <View style={styles.bodyField}>
                       <Text style={styles.bodyLabel}>LOCALIZAÇÃO</Text>
                       <Text style={styles.bodyValue}>{m.localizacao || '—'}</Text>
-                    </View>
-                  </View>
-                  <View style={styles.bodyRow}>
-                    <View style={styles.bodyField}>
-                      <Text style={styles.bodyLabel}>FORNECEDOR</Text>
-                      <Text style={styles.bodyValue}>{m.fornecedor || '—'}</Text>
                     </View>
                   </View>
                   <View style={styles.actionsRow}>
@@ -269,13 +256,15 @@ export const InventarioScreen: React.FC = () => {
                         <Text style={styles.actionBtnText}>DAR ENTRADA</Text>
                       </TouchableOpacity>
                     )}
-                    <TouchableOpacity
-                      style={styles.pedidoBtn}
-                      onPress={() => {setPedidoMat(m); setPedidoQty(''); setPedidoMotivo(''); setShowPedido(true);}}
-                      activeOpacity={0.85}>
-                      <Plus size={13} color="#fff" strokeWidth={3} />
-                      <Text style={styles.actionBtnText}>PEDIR MATERIAL</Text>
-                    </TouchableOpacity>
+                    {canPedido && (
+                      <TouchableOpacity
+                        style={styles.pedidoBtn}
+                        onPress={() => {setPedidoMat(m); setPedidoQty(''); setPedidoMotivo(''); setShowPedido(true);}}
+                        activeOpacity={0.85}>
+                        <Plus size={13} color="#fff" strokeWidth={3} />
+                        <Text style={styles.actionBtnText}>PEDIR MATERIAL</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 </View>
               )}
@@ -344,11 +333,11 @@ export const InventarioScreen: React.FC = () => {
                 <TouchableOpacity onPress={() => setShowAddMat(false)}><X size={20} color={Colors.gray500} /></TouchableOpacity>
               </View>
               {([
-                {label: 'CÓDIGO *',     key: 'codigo',      placeholder: 'Ex: MP-015'},
-                {label: 'DESIGNAÇÃO *', key: 'nome',        placeholder: 'Ex: Chapa Aço 3mm'},
-                {label: 'UNIDADE',      key: 'unidade',     placeholder: 'Ex: un, ml, kg, lt'},
-                {label: 'STOCK MÍNIMO', key: 'stockMinimo', placeholder: '0', keyboardType: 'numeric'},
-                {label: 'LOCALIZAÇÃO',  key: 'localizacao', placeholder: 'Ex: A1-04'},
+                {label: 'CÓDIGO *',      key: 'codigo',      placeholder: 'Ex: MP-015'},
+                {label: 'DESIGNAÇÃO *',  key: 'nome',        placeholder: 'Ex: Chapa Aço 3mm'},
+                {label: 'UNIDADE',       key: 'unidade',     placeholder: 'Ex: un, ml, kg, lt'},
+                {label: 'STOCK MÍNIMO',  key: 'stockMinimo', placeholder: 'Ex: 5', keyboardType: 'numeric'},
+                {label: 'LOCALIZAÇÃO',   key: 'localizacao', placeholder: 'Ex: A1-04'},
               ] as any[]).map((f: any) => (
                 <View key={f.key} style={styles.modalField}>
                   <Text style={styles.modalLabel}>{f.label}</Text>
@@ -451,8 +440,6 @@ const styles = StyleSheet.create({
   statusText: {fontSize: 9, fontFamily: 'Exo2_700Bold', letterSpacing: 0.3},
   cardNome: {fontFamily: 'Exo2_600SemiBold', fontSize: FontSize.sm, color: Colors.gray900},
   cardCat: {fontSize: 10, color: Colors.gray400, fontFamily: 'Exo2_400Regular'},
-  stockBarBg: {height: 4, backgroundColor: Colors.gray100, borderRadius: 2, overflow: 'hidden', marginTop: 4},
-  stockBarFill: {height: 4, borderRadius: 2},
   cardHeaderRight: {alignItems: 'center', gap: 2},
   stockNum: {fontFamily: 'Exo2_700Bold', fontSize: 20},
   unidade: {fontSize: 10, color: Colors.gray400, fontFamily: 'Exo2_400Regular'},

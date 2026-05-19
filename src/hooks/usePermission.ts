@@ -17,7 +17,6 @@ export const usePermission = () => {
 
     // Helpers booleanos por perfil
     isDirecao: role === 'direcao',
-    isRH: role === 'rh',
     isPlaneamento: role === 'planeamento',
     isArmazem: role === 'armazem',
     isProducao: role === 'producao',
@@ -43,10 +42,8 @@ export const usePermission = () => {
     canManageStock: can('armazem', 'direcao'),
     canResponderPedidoMaterial: can('armazem', 'direcao'),
     canCreatePedidoMaterial: can('producao', 'armazem', 'direcao'),
-    canCreatePedidoCompra: can('armazem', 'direcao'),
     canManageQualidade: can('qualidade', 'direcao'),
     canManageExpedicao: can('expedicao', 'direcao'),
-    canManageRH: can('rh', 'direcao'),
     canViewAllOPs: can('direcao', 'planeamento', 'qualidade', 'expedicao'),
     canRegisterProgress: can('producao', 'direcao'),
     canRequestAssistance: can('producao'),

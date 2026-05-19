@@ -73,9 +73,7 @@ export const MaterialDetailScreen: React.FC = () => {
               ['Nome', material.nome],
               ['Unidade', material.unidade],
               ['Stock Mínimo', `${material.stockMinimo} ${material.unidade}`],
-              ['Stock Máximo', `${material.stockMaximo} ${material.unidade}`],
               ...(material.localizacao ? [['Localização', material.localizacao]] : []),
-              ...(material.fornecedor ? [['Fornecedor', material.fornecedor]] : []),
               ...(material.precoUnitario ? [['Preço Unit.', `€${material.precoUnitario.toFixed(2)}`]] : []),
             ] as [string, string][]
           ).map(([label, value]) => (

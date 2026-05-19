@@ -73,6 +73,9 @@ export const PlaneamentoScreen: React.FC = () => {
   const [showNova, setShowNova]       = useState(false);
   const [nova, setNova]               = useState(EMPTY_NOVA);
   const [estadoPickId, setEstadoPickId] = useState<number | null>(null);
+  const [clientes, setClientes]       = useState<{id: number; nome: string}[]>([]);
+  const [clienteId, setClienteId]     = useState<number | null>(null);
+  const [showClientePicker, setShowClientePicker] = useState(false);
 
   const getDisplayName = () => {
     if (!user) return 'Utilizador';
@@ -83,8 +86,13 @@ export const PlaneamentoScreen: React.FC = () => {
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await ordersApi.getAll({search: search || undefined});
+      const [data, cls] = await Promise.all([
+        ordersApi.getAll({search: search || undefined}),
+        ordersApi.getClientes(),
+      ]);
       setOrdens(data);
+      setClientes(cls);
+      if (cls.length > 0 && !clienteId) setClienteId(cls[0].id);
     } catch (e) {
       console.error('Erro ao carregar ordens:', e);
     } finally {
@@ -132,16 +140,20 @@ export const PlaneamentoScreen: React.FC = () => {
   };
 
   const addOrdem = async () => {
-    if (!nova.nome.trim()) return;
+    if (!nova.nome.trim() || !clienteId) return;
     try {
+      const nextRef = await ordersApi.getNextReferencia();
       await ordersApi.create({
+        referencia:     nextRef,
         descricao:      nova.nome,
         status:         'planeamento',
-        prioridade:     'media',
+        prioridade:     nova.prioridade as any,
         dataInicio:     nova.dataInicio,
         dataFimPrevista:nova.dataFim,
         responsavel:    nova.responsavel,
-      });
+        clienteId:      clienteId,
+        criadoPorId:    user?.id,
+      } as any);
       setNova(EMPTY_NOVA);
       setShowNova(false);
       load();
@@ -187,7 +199,7 @@ export const PlaneamentoScreen: React.FC = () => {
           <ChevronDown size={12} color={NAVY} />
         </TouchableOpacity>
         {canEdit && (
-          <TouchableOpacity style={styles.novaBtn} onPress={() => setShowNova(true)} activeOpacity={0.85}>
+          <TouchableOpacity style={styles.novaBtn} onPress={() => router.push('/orders/create')} activeOpacity={0.85}>
             <Plus size={16} color="#fff" strokeWidth={3} />
           </TouchableOpacity>
         )}
@@ -433,6 +445,30 @@ export const PlaneamentoScreen: React.FC = () => {
                 </View>
               ))}
               <View style={styles.novaField}>
+                <Text style={styles.novaLabel}>CLIENTE *</Text>
+                <TouchableOpacity
+                  style={styles.novaInput}
+                  onPress={() => setShowClientePicker(v => !v)}
+                  activeOpacity={0.85}>
+                  <Text style={{fontSize: FontSize.sm, color: clienteId ? Colors.gray900 : Colors.gray400}}>
+                    {clientes.find(c => c.id === clienteId)?.nome || 'Selecionar cliente'} ▾
+                  </Text>
+                </TouchableOpacity>
+                {showClientePicker && (
+                  <View style={styles.pickerMenu}>
+                    {clientes.map(c => (
+                      <TouchableOpacity
+                        key={c.id}
+                        style={styles.pickerMenuItem}
+                        onPress={() => {setClienteId(c.id); setShowClientePicker(false);}}>
+                        <Text style={styles.pickerMenuItemText}>{c.nome}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.novaField}>
                 <Text style={styles.novaLabel}>PRIORIDADE</Text>
                 <View style={styles.prioRow}>
                   {([['media','Média'], ['alta','Alta'], ['baixa','Normal']] as [string,string][]).map(([db, lbl]) => (
@@ -546,4 +582,8 @@ const styles = StyleSheet.create({
   prioOptionText: {fontSize: 11, fontFamily: 'Exo2_700Bold', color: Colors.gray500},
   novaSaveBtn: {backgroundColor: ORANGE, borderRadius: BorderRadius.full, paddingVertical: 12, alignItems: 'center', marginTop: Spacing.sm},
   novaSaveBtnText: {color: '#fff', fontFamily: 'Exo2_700Bold', fontSize: FontSize.sm, letterSpacing: 1},
+
+  pickerMenu: {backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: Colors.border, marginTop: 4, zIndex: 99, elevation: 8, shadowColor: '#000', shadowOffset: {width: 0, height: 2}, shadowOpacity: 0.12, shadowRadius: 6},
+  pickerMenuItem: {paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm},
+  pickerMenuItemText: {fontSize: FontSize.sm, color: Colors.gray700, fontFamily: 'Exo2_400Regular'},
 });

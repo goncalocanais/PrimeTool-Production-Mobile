@@ -1,7 +1,8 @@
-import React, {useState, useEffect, useCallback} from 'react';
+import React, {useState, useEffect, useCallback, useRef} from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Modal, TextInput, ActivityIndicator, RefreshControl,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
 import {useRouter, useLocalSearchParams} from 'expo-router';
 import {Play, Pause, Square, Plus, Clock, Package, History, Info, ClipboardList, CheckCircle} from 'lucide-react-native';
@@ -9,6 +10,8 @@ import {useAppSelector} from '../../store';
 import {AppHeader, BottomNavBar} from '../../components/common';
 import {Colors, Spacing, FontSize, BorderRadius} from '../../theme';
 import {ordersApi} from '../../api/orders';
+import {notificacoesApi} from '../../api/notificacoes';
+import {materialsApi} from '../../api/materials';
 import {OrdemProducao, RegistoProgresso} from '../../types';
 import {supabase} from '../../lib/supabase';
 
@@ -36,8 +39,8 @@ const ESTADO_BADGE: Record<string, {bg: string; color: string}> = {
   pausada:     {bg: ORANGE,          color: '#fff'},
 };
 
-interface MaterialUtilizado { id: number; codigo: string; nome: string; quantidade: number; }
 interface PedidoMaterial    { id: number; descricao: string; quantidade: number; estado: string; pedidoEm: string; }
+interface MaterialNecessario { id: number; descricao: string; quantidade: number; }
 
 function formatTime(secs: number) {
   const h = Math.floor(secs / 3600).toString().padStart(2, '0');
@@ -75,14 +78,18 @@ export const OrderDetailScreen: React.FC = () => {
 
   const [ordem, setOrdem]             = useState<OrdemProducao | null>(null);
   const [historico, setHistorico]     = useState<RegistoProgresso[]>([]);
-  const [materiais, setMateriais]     = useState<MaterialUtilizado[]>([]);
-  const [pedidos, setPedidos]         = useState<PedidoMaterial[]>([]);
+  const [pedidos, setPedidos]             = useState<PedidoMaterial[]>([]);
+  const [necessarios, setNecessarios]     = useState<MaterialNecessario[]>([]);
   const [isLoading, setIsLoading]     = useState(true);
   const [isPaused, setIsPaused]       = useState(false);
   const [timerSecs, setTimerSecs]     = useState(0);
   const [timerActive, setTimerActive] = useState(false);
+  const [timerDone, setTimerDone]     = useState(false);
   const [showAddMaterial, setShowAddMaterial] = useState(false);
-  const [novoMat, setNovoMat]         = useState({descricao: '', qty: ''});
+  const [novoMat, setNovoMat]         = useState({descricao: '', qty: '', valid: false});
+  const [matSuggestions, setMatSuggestions] = useState<string[]>([]);
+  const [matStockError, setMatStockError] = useState('');
+  const suggTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [notification, setNotification] = useState('');
 
   const getDisplayName = () => {
@@ -102,32 +109,25 @@ export const OrderDetailScreen: React.FC = () => {
       setOrdem(ordemData);
       setHistorico(historicoData);
 
-      const [movRes, pedRes] = await Promise.all([
-        supabase
-          .from('armazem_movimentostock')
-          .select('id, quantidade, material_obj:armazem_material!material_id(id, codigo, nome)')
-          .eq('referencia_doc', ordemData.referencia)
-          .eq('tipo', 'saida'),
-        supabase
-          .from('producao_pedidomaterialadicional')
-          .select('id, descricao_material, quantidade, estado, pedido_em')
-          .eq('ordem_id', numId)
-          .order('pedido_em', {ascending: false}),
-      ]);
+      const pedRes = await supabase
+        .from('producao_pedidomaterialadicional')
+        .select('id, descricao_material, quantidade, estado, observacoes, pedido_em')
+        .eq('ordem_id', numId)
+        .order('pedido_em', {ascending: false});
 
-      setMateriais((movRes.data ?? []).map((r: any) => ({
-        id: r.id,
-        codigo: r.material_obj?.codigo ?? '',
-        nome: r.material_obj?.nome ?? '—',
-        quantidade: r.quantidade,
-      })));
-      setPedidos((pedRes.data ?? []).map((r: any) => ({
-        id: r.id,
-        descricao: r.descricao_material,
-        quantidade: r.quantidade,
-        estado: r.estado,
-        pedidoEm: r.pedido_em,
-      })));
+      const allPedidos = pedRes.data ?? [];
+      setNecessarios(allPedidos
+        .filter((r: any) => r.observacoes === 'planeamento')
+        .map((r: any) => ({id: r.id, descricao: r.descricao_material, quantidade: r.quantidade})));
+      setPedidos(allPedidos
+        .filter((r: any) => r.observacoes !== 'planeamento')
+        .map((r: any) => ({
+          id: r.id,
+          descricao: r.descricao_material,
+          quantidade: r.quantidade,
+          estado: r.estado,
+          pedidoEm: r.pedido_em,
+        })));
     } catch (e) {
       console.error('Erro ao carregar ordem:', e);
     } finally {
@@ -147,6 +147,33 @@ export const OrderDetailScreen: React.FC = () => {
     setNotification(msg);
     setTimeout(() => setNotification(''), 3500);
   }
+
+  const handleMatDescricaoChange = (text: string) => {
+    setNovoMat(d => ({...d, descricao: text, valid: false}));
+    if (suggTimeout.current) clearTimeout(suggTimeout.current);
+    if (text.length >= 2) {
+      suggTimeout.current = setTimeout(async () => {
+        try {
+          const results = await materialsApi.getAll(text);
+          setMatSuggestions(results.map(r => r.nome));
+        } catch { setMatSuggestions([]); }
+      }, 250);
+    } else {
+      setMatSuggestions([]);
+    }
+  };
+
+  const selectMatSuggestion = (nome: string) => {
+    setNovoMat(d => ({...d, descricao: nome, valid: true}));
+    setMatSuggestions([]);
+  };
+
+  const closeAddMaterial = () => {
+    setShowAddMaterial(false);
+    setNovoMat({descricao: '', qty: '', valid: false});
+    setMatSuggestions([]);
+    setMatStockError('');
+  };
 
   async function handleIniciar() {
     if (!ordem) return;
@@ -176,28 +203,51 @@ export const OrderDetailScreen: React.FC = () => {
   async function handleTerminar() {
     setTimerActive(false);
     setIsPaused(false);
+    setTimerDone(true);
     try {
-      await ordersApi.updateProgress(numId, 0, 'Produção concluída.');
-      showNotif('Produção concluída! Atualize o estado da OP para continuar o fluxo.');
+      await ordersApi.updateStatus(numId, 'qualidade');
+      await ordersApi.updateProgress(numId, 0, 'Produção concluída. Enviado para controlo de qualidade.');
+      showNotif('Produção concluída! OP enviada para controlo de qualidade.');
       load();
     } catch (e) { console.error(e); }
   }
 
   async function handleAddMaterial() {
-    if (!novoMat.descricao.trim()) return;
+    if (!novoMat.descricao.trim() || !novoMat.valid) return;
+    const qty = parseFloat(novoMat.qty) || 1;
     try {
+      // Verificar stock ANTES de registar
+      setMatStockError('');
+      const stock = await materialsApi.getStockByName(novoMat.descricao);
+      if (stock.materialId !== null && stock.available < qty) {
+        notificacoesApi.create(
+          'armazem',
+          'Reposição de stock necessária',
+          `OP ${ordem?.referencia}: ${novoMat.descricao} — pedido ${qty}, disponível ${stock.available}. Repor stock.`,
+          numId,
+        ).catch(() => {});
+        setMatStockError(`Stock insuficiente: só há ${stock.available} unidade(s) de ${novoMat.descricao} em armazém.\n\nO armazém foi notificado para repor o stock. Tenta novamente após a reposição.`);
+        return;
+      }
+
       await supabase.from('producao_pedidomaterialadicional').insert({
         descricao_material: novoMat.descricao,
-        quantidade: parseFloat(novoMat.qty) || 1,
+        quantidade: qty,
         unidade: 'un',
         justificacao: '',
         observacoes: '',
         estado: 'pendente',
         ordem_id: numId,
+        pedido_em: new Date().toISOString(),
       });
       await ordersApi.updateProgress(numId, 0, `Material adicional pedido: ${novoMat.descricao}.`);
-      setNovoMat({descricao: '', qty: ''});
-      setShowAddMaterial(false);
+      notificacoesApi.create('armazem', 'Material adicional pedido', `OP ${ordem?.referencia}: ${novoMat.descricao} (${qty} un).`, numId).catch(() => {});
+
+      if (stock.materialId) {
+        await materialsApi.deductByName(stock.materialId, qty, ordem?.referencia ?? '');
+      }
+
+      closeAddMaterial();
       load();
     } catch (e) { console.error(e); }
   }
@@ -227,8 +277,9 @@ export const OrderDetailScreen: React.FC = () => {
   const statusKey = isPaused ? 'pausada' : (ordem.status ?? 'planeamento');
   const displayEstado = isPaused ? 'PAUSADA' : (ESTADO_LABEL[ordem.status] ?? ordem.status);
   const badge = ESTADO_BADGE[statusKey] ?? {bg: Colors.gray500, color: '#fff'};
-  const podeIniciar = !['em_producao', 'concluida', 'cancelada'].includes(ordem.status) && !isPaused;
+  const podeIniciar = ordem.status === 'planeamento' && !isPaused;
   const emProducao  = ordem.status === 'em_producao' || isPaused;
+  const producaoConcluida = ['qualidade', 'expedicao', 'montagem', 'concluida'].includes(ordem.status) || timerDone;
   const canControl  = ['producao', 'direcao'].includes(role);
 
   return (
@@ -297,7 +348,7 @@ export const OrderDetailScreen: React.FC = () => {
           <View style={styles.card}>
             <SectionHeader icon={<Clock size={14} color="rgba(255,255,255,0.75)" />} title="CONTROLO DE PRODUÇÃO" />
             <View style={styles.timerBody}>
-              {ordem.status === 'concluida' ? (
+              {producaoConcluida ? (
                 <View style={styles.timerRow}>
                   <CheckCircle size={20} color="#16a34a" />
                   <Text style={styles.timerDoneText}>Produção concluída</Text>
@@ -330,42 +381,33 @@ export const OrderDetailScreen: React.FC = () => {
           </View>
         )}
 
-        {/* ── Materiais Utilizados ── */}
-        <View style={styles.card}>
-          <SectionHeader icon={<Package size={14} color="rgba(255,255,255,0.75)" />} title="MATERIAIS UTILIZADOS" />
-          {materiais.length === 0 ? (
-            <View style={styles.emptySection}>
-              <Text style={styles.emptySectionText}>Sem saídas de material registadas para esta OP.</Text>
+        {/* ── Materiais Previstos ── */}
+        {necessarios.length > 0 && (
+          <View style={styles.card}>
+            <SectionHeader icon={<Package size={14} color="rgba(255,255,255,0.75)" />} title="MATERIAIS PREVISTOS" />
+            <View style={styles.tableHeader}>
+              <Text style={[styles.tableHeadText, {flex: 1}]}>MATERIAL</Text>
+              <Text style={styles.tableHeadText}>QTD.</Text>
             </View>
-          ) : (
-            <>
-              <View style={styles.tableHeader}>
-                <Text style={[styles.tableHeadText, {flex: 1}]}>MATERIAL / DESCRIÇÃO</Text>
-                <Text style={styles.tableHeadText}>QTD.</Text>
+            {necessarios.map(m => (
+              <View key={m.id} style={styles.tableRow}>
+                <Text style={[styles.tableCell, {flex: 1}]}>{m.descricao}</Text>
+                <Text style={styles.tableCell}>{m.quantidade}</Text>
               </View>
-              {materiais.map((mat, i) => (
-                <View key={mat.id} style={[styles.tableRow, i < materiais.length - 1 && styles.tableRowBorder]}>
-                  <View style={{flex: 1}}>
-                    <Text style={styles.tableCell}>{mat.nome}</Text>
-                    {!!mat.codigo && <Text style={styles.tableCellSub}>{mat.codigo}</Text>}
-                  </View>
-                  <Text style={styles.tableCellBold}>{mat.quantidade}</Text>
-                </View>
-              ))}
-            </>
-          )}
-        </View>
+            ))}
+          </View>
+        )}
 
         {/* ── Pedidos de Material Adicional ── */}
         <View style={styles.card}>
           <SectionHeader
             icon={<Plus size={14} color="rgba(255,255,255,0.75)" />}
             title="MATERIAL ADICIONAL PEDIDO"
-            action={
+            action={canControl ? (
               <TouchableOpacity style={styles.pedirBtn} onPress={() => setShowAddMaterial(true)} activeOpacity={0.85}>
                 <Text style={styles.pedirBtnText}>+ PEDIR MATERIAL</Text>
               </TouchableOpacity>
-            }
+            ) : undefined}
           />
           {pedidos.length === 0 ? (
             <View style={styles.emptySection}>
@@ -413,42 +455,75 @@ export const OrderDetailScreen: React.FC = () => {
 
       <BottomNavBar />
 
-      <Modal visible={showAddMaterial} transparent animationType="fade" onRequestClose={() => setShowAddMaterial(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowAddMaterial(false)}>
-          <View style={styles.modalBox} onStartShouldSetResponder={() => true}>
-            <Text style={styles.modalTitle}>Pedir Material Adicional</Text>
-            <View style={styles.modalField}>
-              <Text style={styles.modalLabel}>MATERIAL / DESCRIÇÃO</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="Ex: Chapa de aço 2mm"
-                placeholderTextColor={Colors.gray400}
-                value={novoMat.descricao}
-                onChangeText={v => setNovoMat(d => ({...d, descricao: v}))}
-                autoFocus
-              />
+      {/* ── Modal Pedir Material ── */}
+      <Modal visible={showAddMaterial} transparent animationType="fade" onRequestClose={closeAddMaterial}>
+        <KeyboardAvoidingView style={{flex: 1}} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={closeAddMaterial}>
+            <View style={styles.modalBox} onStartShouldSetResponder={() => true}>
+              <Text style={styles.modalTitle}>Pedir Material Adicional</Text>
+
+              {!!matStockError && (
+                <View style={styles.stockErrorBox}>
+                  <Text style={styles.stockErrorTitle}>⚠ Stock insuficiente</Text>
+                  <Text style={styles.stockErrorText}>{matStockError}</Text>
+                </View>
+              )}
+
+              <View style={styles.modalField}>
+                <Text style={styles.modalLabel}>MATERIAL / DESCRIÇÃO</Text>
+                <TextInput
+                  style={[
+                    styles.modalInput,
+                    novoMat.descricao.trim() && !novoMat.valid && styles.modalInputError,
+                    novoMat.valid && styles.modalInputValid,
+                  ]}
+                  placeholder="Escreve para pesquisar..."
+                  placeholderTextColor={Colors.gray400}
+                  value={novoMat.descricao}
+                  onChangeText={handleMatDescricaoChange}
+                  autoFocus
+                />
+                {matSuggestions.length > 0 && (
+                  <View style={styles.suggBox}>
+                    {matSuggestions.map((s, i) => (
+                      <TouchableOpacity key={i} style={styles.suggItem} onPress={() => selectMatSuggestion(s)}>
+                        <Text style={styles.suggText}>{s}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+                {novoMat.descricao.trim() && !novoMat.valid && (
+                  <Text style={styles.modalErrorText}>Seleciona um material da lista do inventário</Text>
+                )}
+              </View>
+
+              <View style={styles.modalField}>
+                <Text style={styles.modalLabel}>QUANTIDADE</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Ex: 2"
+                  placeholderTextColor={Colors.gray400}
+                  value={novoMat.qty}
+                  onChangeText={v => setNovoMat(d => ({...d, qty: v}))}
+                  keyboardType="numeric"
+                />
+              </View>
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalCancelBtn} onPress={closeAddMaterial} activeOpacity={0.85}>
+                  <Text style={styles.modalCancelText}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalConfirmBtn, !novoMat.valid && styles.modalConfirmBtnDisabled]}
+                  onPress={handleAddMaterial}
+                  disabled={!novoMat.valid}
+                  activeOpacity={0.85}>
+                  <Text style={styles.modalConfirmText}>Pedir</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-            <View style={styles.modalField}>
-              <Text style={styles.modalLabel}>QUANTIDADE</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="Ex: 2"
-                placeholderTextColor={Colors.gray400}
-                value={novoMat.qty}
-                onChangeText={v => setNovoMat(d => ({...d, qty: v}))}
-                keyboardType="numeric"
-              />
-            </View>
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setShowAddMaterial(false)} activeOpacity={0.85}>
-                <Text style={styles.modalCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalConfirmBtn} onPress={handleAddMaterial} activeOpacity={0.85}>
-                <Text style={styles.modalConfirmText}>Pedir</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -515,9 +590,42 @@ const styles = StyleSheet.create({
   modalField: {marginBottom: Spacing.md},
   modalLabel: {fontSize: 10, fontFamily: 'Exo2_700Bold', color: Colors.gray400, letterSpacing: 1, marginBottom: 5},
   modalInput: {borderWidth: 1.5, borderColor: Colors.border, borderRadius: 8, padding: Spacing.sm + 2, fontSize: FontSize.sm, color: Colors.gray900, fontFamily: 'Exo2_400Regular', backgroundColor: '#fff'},
+  modalInputError: {borderColor: Colors.danger},
+  modalInputValid: {borderColor: Colors.success, backgroundColor: '#f0fdf4'},
+  modalErrorText: {fontSize: FontSize.xs, color: Colors.danger, marginTop: 3, fontFamily: 'Exo2_400Regular'},
   modalActions: {flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.sm},
   modalCancelBtn: {flex: 1, backgroundColor: Colors.gray500, borderRadius: BorderRadius.full, paddingVertical: 11, alignItems: 'center'},
   modalCancelText: {color: '#fff', fontFamily: 'Exo2_700Bold', fontSize: 12},
   modalConfirmBtn: {flex: 1, backgroundColor: ORANGE, borderRadius: BorderRadius.full, paddingVertical: 11, alignItems: 'center'},
+  modalConfirmBtnDisabled: {backgroundColor: Colors.gray300},
   modalConfirmText: {color: '#fff', fontFamily: 'Exo2_700Bold', fontSize: 12},
+
+  stockErrorBox: {
+    backgroundColor: '#fff5f5',
+    borderWidth: 1.5,
+    borderColor: Colors.danger,
+    borderRadius: 10,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  stockErrorTitle: {
+    color: Colors.danger,
+    fontFamily: 'Exo2_700Bold',
+    fontSize: FontSize.sm,
+    marginBottom: 4,
+  },
+  stockErrorText: {
+    color: Colors.danger,
+    fontFamily: 'Exo2_400Regular',
+    fontSize: FontSize.xs,
+    lineHeight: 18,
+  },
+
+  suggBox: {
+    backgroundColor: '#fff', borderWidth: 1, borderColor: Colors.border,
+    borderRadius: 8, marginTop: 2, elevation: 6,
+    shadowColor: '#000', shadowOffset: {width: 0, height: 2}, shadowOpacity: 0.1, shadowRadius: 4,
+  },
+  suggItem: {paddingHorizontal: Spacing.md, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.gray50},
+  suggText: {fontSize: FontSize.sm, color: Colors.gray800, fontFamily: 'Exo2_400Regular'},
 });

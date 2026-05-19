@@ -1,17 +1,27 @@
-import React, {useState} from 'react';
+import React, {useState, useEffect, useRef} from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
+  FlatList,
+  Modal,
   TouchableOpacity,
   TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
 } from 'react-native';
 import {useRouter} from 'expo-router';
+import {X} from 'lucide-react-native';
 import {useAppDispatch, useAppSelector} from '../../store';
 import {createOrder} from '../../store/slices/ordersSlice';
 import {Colors, Spacing, FontSize, FontWeight, BorderRadius} from '../../theme';
-import {AppHeader, BottomNavBar} from '../../components/common';
+import {AppHeader, BottomNavBar, DateInput} from '../../components/common';
+import {ordersApi} from '../../api/orders';
+import {materialsApi} from '../../api/materials';
+import {notificacoesApi} from '../../api/notificacoes';
+import {supabase} from '../../lib/supabase';
 
 const ORANGE = '#ff7700'; // --orange design system
 
@@ -22,39 +32,42 @@ const PRIORIDADES = [
   {label: 'Urgente', value: 'urgente'},
 ];
 
-const CLIENTES = [
-  'ADRC Vasco da Gama',
-  'Ascendi Operações, SA',
-  'AEISCAC',
-  'Universidade do Minho',
-  'Grupo Sonae',
-  'NOS Comunicações',
-  'EDP Renováveis',
-  'Câmara Municipal de Coimbra',
-];
 
 interface Material {
   nome: string;
   quantidade: string;
+  valid: boolean;
 }
 
 export const CreateOrderScreen: React.FC = () => {
   const dispatch = useAppDispatch();
   const router = useRouter();
-  const {orders, isLoading} = useAppSelector(s => s.orders);
-
-  // Auto-generate reference
-  const nextRef = `2026-${String(orders.length + 1).padStart(4, '0')}`;
+  const {isLoading} = useAppSelector(s => s.orders);
 
   const [nome, setNome] = useState('');
-  const [cliente, setCliente] = useState('');
+  const [clienteId, setClienteId] = useState<number | null>(null);
+  const [clienteNome, setClienteNome] = useState('');
+  const [clientes, setClientes] = useState<{id: number; nome: string}[]>([]);
   const [prioridade, setPrioridade] = useState('Normal');
   const [dataEntrega, setDataEntrega] = useState('');
+  const [nextRef, setNextRef] = useState('A gerar...');
   const [materiais, setMateriais] = useState<Material[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [activeSuggRow, setActiveSuggRow] = useState<number | null>(null);
+  const suggTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showClientePicker, setShowClientePicker] = useState(false);
   const [showPrioridadePicker, setShowPrioridadePicker] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const user = useAppSelector(s => s.auth.user);
+
+  useEffect(() => {
+    ordersApi.getNextReferencia().then(setNextRef).catch(() => setNextRef('2026-0001'));
+    ordersApi.getClientes().then(cls => {
+      setClientes(cls);
+      if (cls.length > 0) { setClienteId(cls[0].id); setClienteNome(cls[0].nome); }
+    }).catch(() => {});
+  }, []);
+
   const getDisplayName = () => {
     if (!user) return 'Utilizador';
     const parts = user.nome.split(' ');
@@ -62,34 +75,120 @@ export const CreateOrderScreen: React.FC = () => {
   };
 
   const addMaterial = () => {
-    setMateriais([...materiais, {nome: '', quantidade: ''}]);
+    setMateriais([...materiais, {nome: '', quantidade: '', valid: false}]);
+  };
+
+  const removeMaterial = (i: number) => {
+    setMateriais(prev => prev.filter((_, idx) => idx !== i));
+    if (activeSuggRow === i) { setSuggestions([]); setActiveSuggRow(null); }
+  };
+
+  const handleNomeChange = (text: string, i: number) => {
+    const updated = [...materiais];
+    updated[i] = {...updated[i], nome: text, valid: false};
+    setMateriais(updated);
+    setActiveSuggRow(i);
+    if (suggTimeout.current) clearTimeout(suggTimeout.current);
+    if (text.length >= 2) {
+      suggTimeout.current = setTimeout(async () => {
+        try {
+          const results = await materialsApi.getAll(text);
+          setSuggestions(results.map(r => r.nome));
+        } catch { setSuggestions([]); }
+      }, 250);
+    } else {
+      setSuggestions([]);
+    }
+  };
+
+  const selectSuggestion = (nome: string, i: number) => {
+    const updated = [...materiais];
+    updated[i] = {...updated[i], nome, valid: true};
+    setMateriais(updated);
+    setSuggestions([]);
+    setActiveSuggRow(null);
   };
 
   const validate = (): boolean => {
     const e: Record<string, string> = {};
     if (!nome.trim()) e.nome = 'Campo obrigatório';
-    if (!cliente.trim()) e.cliente = 'Campo obrigatório';
+    if (!clienteId) e.cliente = 'Campo obrigatório';
     if (!dataEntrega.trim()) e.dataEntrega = 'Campo obrigatório';
+    const invalidMat = materiais.some(m => m.nome.trim() && !m.valid);
+    if (invalidMat) e.materiais = 'Seleciona os materiais da lista do inventário';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
   const handleCreate = async () => {
     if (!validate()) return;
-    await dispatch(
-      createOrder({
+    try {
+      const validMateriais = materiais.filter(m => m.nome.trim() && m.valid);
+
+      // Verificar stock ANTES de criar qualquer coisa
+      if (validMateriais.length > 0) {
+        const insufficient: {nome: string; pedido: number; disponivel: number}[] = [];
+        for (const m of validMateriais) {
+          const qty = parseFloat(m.quantidade) || 1;
+          const stock = await materialsApi.getStockByName(m.nome);
+          if (stock.materialId !== null && stock.available < qty) {
+            insufficient.push({nome: m.nome, pedido: qty, disponivel: stock.available});
+          }
+        }
+        if (insufficient.length > 0) {
+          const linhas = insufficient.map(i => `• ${i.nome}: pedido ${i.pedido}, disponível ${i.disponivel}`).join('\n');
+          for (const i of insufficient) {
+            const stock = await materialsApi.getStockByName(i.nome);
+            notificacoesApi.create(
+              'armazem',
+              'Reposição de stock necessária',
+              `Tentativa de criar OP: ${i.nome} — pedido ${i.pedido}, disponível ${i.disponivel}. Repor stock para desbloquear a OP.`,
+            ).catch(() => {});
+          }
+          Alert.alert(
+            'Stock insuficiente — OP não criada',
+            `Não é possível criar a OP.\n\n${linhas}\n\nO armazém foi notificado. Aguarda a reposição de stock.`,
+          );
+          return;
+        }
+      }
+
+      // Stock suficiente — criar OP
+      const newOp = await ordersApi.create({
         referencia: nextRef,
-        cliente,
         descricao: nome,
-        quantidade: 1,
         dataFimPrevista: dataEntrega,
         prioridade: prioridade.toLowerCase() as any,
         status: 'planeamento',
-        progresso: 0,
         dataInicio: new Date().toISOString(),
-      }),
-    );
-    router.back();
+        clienteId: clienteId ?? undefined,
+        criadoPorId: user?.id,
+      } as any);
+
+      const rows = validMateriais.map(m => ({
+        descricao_material: m.nome,
+        quantidade: parseFloat(m.quantidade) || 1,
+        unidade: 'un',
+        justificacao: '',
+        observacoes: 'planeamento',
+        estado: 'pendente',
+        ordem_id: newOp.id,
+        pedido_em: new Date().toISOString(),
+      }));
+
+      if (rows.length > 0) {
+        await supabase.from('producao_pedidomaterialadicional').insert(rows);
+        // Deduzir stock agora que sabemos que é suficiente
+        for (const r of rows) {
+          const stock = await materialsApi.getStockByName(r.descricao_material);
+          if (stock.materialId) {
+            await materialsApi.deductByName(stock.materialId, r.quantidade, newOp.referencia);
+          }
+        }
+      }
+
+      router.back();
+    } catch (e) { console.error(e); }
   };
 
   return (
@@ -111,6 +210,7 @@ export const CreateOrderScreen: React.FC = () => {
         <Text style={styles.breadcrumbCurrent}>NOVA OP</Text>
       </View>
 
+      <KeyboardAvoidingView style={{flex: 1}} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -169,27 +269,13 @@ export const CreateOrderScreen: React.FC = () => {
           {/* Cliente */}
           <View style={styles.field}>
             <Text style={styles.label}>CLIENTE</Text>
-            <View style={styles.row}>
-              <TouchableOpacity
-                style={[styles.pickerBtn, {flex: 1}, errors.cliente && styles.inputError]}
-                onPress={() => setShowClientePicker(!showClientePicker)}>
-                <Text style={[styles.pickerBtnText, !cliente && {color: Colors.gray400}]}>
-                  {cliente || 'Selecionar cliente'} ▾
-                </Text>
-              </TouchableOpacity>
-            </View>
-            {showClientePicker && (
-              <View style={styles.pickerMenu}>
-                {CLIENTES.map(c => (
-                  <TouchableOpacity
-                    key={c}
-                    style={styles.pickerMenuItem}
-                    onPress={() => {setCliente(c); setShowClientePicker(false);}}>
-                    <Text style={styles.pickerMenuText}>{c}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
+            <TouchableOpacity
+              style={[styles.pickerBtn, errors.cliente && styles.inputError]}
+              onPress={() => setShowClientePicker(true)}>
+              <Text style={[styles.pickerBtnText, !clienteNome && {color: Colors.gray400}]}>
+                {clienteNome || 'Selecionar cliente'} ▾
+              </Text>
+            </TouchableOpacity>
             {errors.cliente && <Text style={styles.errorText}>{errors.cliente}</Text>}
           </View>
 
@@ -205,10 +291,8 @@ export const CreateOrderScreen: React.FC = () => {
             </View>
             <View style={styles.fieldHalf}>
               <Text style={styles.label}>DATA ENTREGA PREVISTA</Text>
-              <TextInput
+              <DateInput
                 style={[styles.input, errors.dataEntrega && styles.inputError]}
-                placeholder="dd/mm/aaaa"
-                placeholderTextColor={Colors.gray400}
                 value={dataEntrega}
                 onChangeText={setDataEntrega}
               />
@@ -221,34 +305,55 @@ export const CreateOrderScreen: React.FC = () => {
             <Text style={styles.addMaterialText}>+  Inserir Material  +</Text>
           </TouchableOpacity>
 
+          {errors.materiais && (
+            <View style={styles.matErrorBox}>
+              <Text style={styles.matErrorText}>{errors.materiais}</Text>
+            </View>
+          )}
+
           {materiais.length > 0 && (
             <View style={styles.materiaisSection}>
               <Text style={styles.label}>LISTA MATERIAL</Text>
               {materiais.map((m, i) => (
-                <View key={i} style={styles.materialRow}>
-                  <TextInput
-                    style={[styles.input, {flex: 2}]}
-                    placeholder="Nome do material"
-                    placeholderTextColor={Colors.gray400}
-                    value={m.nome}
-                    onChangeText={v => {
-                      const updated = [...materiais];
-                      updated[i].nome = v;
-                      setMateriais(updated);
-                    }}
-                  />
-                  <TextInput
-                    style={[styles.input, {flex: 1}]}
-                    placeholder="Qtd."
-                    placeholderTextColor={Colors.gray400}
-                    keyboardType="numeric"
-                    value={m.quantidade}
-                    onChangeText={v => {
-                      const updated = [...materiais];
-                      updated[i].quantidade = v;
-                      setMateriais(updated);
-                    }}
-                  />
+                <View key={i} style={styles.materialRowWrap}>
+                  <View style={styles.materialRow}>
+                    <TextInput
+                      style={[styles.input, {flex: 2},
+                        m.nome.trim() && !m.valid && styles.inputError,
+                        m.valid && styles.inputValid,
+                      ]}
+                      placeholder="Escreve para pesquisar..."
+                      placeholderTextColor={Colors.gray400}
+                      value={m.nome}
+                      onChangeText={v => handleNomeChange(v, i)}
+                      onFocus={() => { setActiveSuggRow(i); if (m.nome.length >= 2) handleNomeChange(m.nome, i); }}
+                      onBlur={() => setTimeout(() => { setSuggestions([]); setActiveSuggRow(null); }, 180)}
+                    />
+                    <TextInput
+                      style={[styles.input, {flex: 1}]}
+                      placeholder="Qtd."
+                      placeholderTextColor={Colors.gray400}
+                      keyboardType="numeric"
+                      value={m.quantidade}
+                      onChangeText={v => {
+                        const updated = [...materiais];
+                        updated[i].quantidade = v;
+                        setMateriais(updated);
+                      }}
+                    />
+                    <TouchableOpacity onPress={() => removeMaterial(i)} style={styles.removeBtn} hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}>
+                      <X size={16} color={Colors.danger} strokeWidth={2.5} />
+                    </TouchableOpacity>
+                  </View>
+                  {activeSuggRow === i && suggestions.length > 0 && (
+                    <View style={styles.suggBox}>
+                      {suggestions.map((s, si) => (
+                        <TouchableOpacity key={si} style={styles.suggItem} onPress={() => selectSuggestion(s, i)}>
+                          <Text style={styles.suggText}>{s}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
                 </View>
               ))}
             </View>
@@ -268,7 +373,30 @@ export const CreateOrderScreen: React.FC = () => {
           <Text style={styles.createBtnText}>CRIAR ORDEM DE PRODUÇÃO</Text>
         </TouchableOpacity>
       </ScrollView>
+      </KeyboardAvoidingView>
       <BottomNavBar />
+
+      <Modal visible={showClientePicker} transparent animationType="fade" onRequestClose={() => setShowClientePicker(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowClientePicker(false)}>
+          <View style={styles.modalBox} onStartShouldSetResponder={() => true}>
+            <Text style={styles.modalTitle}>SELECIONAR CLIENTE</Text>
+            <FlatList
+              data={clientes}
+              keyExtractor={c => String(c.id)}
+              style={styles.modalList}
+              renderItem={({item}) => (
+                <TouchableOpacity
+                  style={[styles.modalItem, item.id === clienteId && styles.modalItemActive]}
+                  onPress={() => {setClienteId(item.id); setClienteNome(item.nome); setShowClientePicker(false);}}>
+                  <Text style={[styles.modalItemText, item.id === clienteId && styles.modalItemTextActive]}>
+                    {item.nome}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 };
@@ -333,6 +461,19 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
   },
   inputError: {borderColor: Colors.danger},
+  inputValid: {borderColor: Colors.success, backgroundColor: '#f0fdf4'},
+  matErrorBox: {
+    marginHorizontal: Spacing.md,
+    marginTop: Spacing.xs,
+    backgroundColor: '#fef2f2',
+    borderRadius: BorderRadius.md,
+    padding: Spacing.sm,
+  },
+  matErrorText: {
+    color: Colors.danger,
+    fontSize: FontSize.xs,
+    fontFamily: 'Exo2_400Regular',
+  },
   inputReadonly: {
     borderWidth: 1,
     borderColor: Colors.border,
@@ -387,7 +528,38 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.semibold as any,
   },
   materiaisSection: {paddingHorizontal: Spacing.md, paddingBottom: Spacing.md, gap: Spacing.sm},
-  materialRow: {flexDirection: 'row', gap: Spacing.sm},
+  materialRowWrap: {zIndex: 10},
+  materialRow: {flexDirection: 'row', gap: Spacing.sm, alignItems: 'center'},
+  removeBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  suggBox: {
+    backgroundColor: Colors.white,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: BorderRadius.md,
+    marginTop: 2,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  suggItem: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.gray50,
+  },
+  suggText: {
+    fontSize: FontSize.sm,
+    color: Colors.gray800,
+    fontFamily: 'Exo2_400Regular',
+  },
   emptyMateriais: {
     color: Colors.gray400,
     fontSize: FontSize.sm,
@@ -408,4 +580,13 @@ const styles = StyleSheet.create({
     fontSize: FontSize.base,
     letterSpacing: 1,
   },
+
+  modalOverlay: {flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', alignItems: 'center', padding: Spacing.xl},
+  modalBox: {backgroundColor: Colors.white, borderRadius: BorderRadius.lg, width: '100%', maxHeight: 400, overflow: 'hidden', shadowColor: '#000', shadowOffset: {width: 0, height: 8}, shadowOpacity: 0.15, shadowRadius: 24, elevation: 12},
+  modalTitle: {fontSize: FontSize.xs, fontFamily: 'Exo2_700Bold', color: Colors.gray500, letterSpacing: 1.5, padding: Spacing.md, borderBottomWidth: 1, borderBottomColor: Colors.border},
+  modalList: {maxHeight: 340},
+  modalItem: {paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm + 2, borderBottomWidth: 1, borderBottomColor: Colors.gray50},
+  modalItemActive: {backgroundColor: Colors.gray50},
+  modalItemText: {fontSize: FontSize.sm, fontFamily: 'Exo2_400Regular', color: Colors.gray700},
+  modalItemTextActive: {fontFamily: 'Exo2_700Bold', color: Colors.primary},
 });

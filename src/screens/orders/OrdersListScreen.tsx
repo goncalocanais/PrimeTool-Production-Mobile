@@ -1,10 +1,11 @@
-import React, {useState} from 'react';
-import {View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Modal} from 'react-native';
+import React, {useState, useCallback} from 'react';
+import {View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Modal, ActivityIndicator} from 'react-native';
 import {useRouter} from 'expo-router';
+import {useFocusEffect} from 'expo-router';
 import {Search, ChevronDown} from 'lucide-react-native';
 import {useAppSelector, useAppDispatch} from '../../store';
 import {AppHeader, BottomNavBar} from '../../components/common';
-import {deleteOrder} from '../../store/slices/ordersSlice';
+import {fetchOrders, deleteOrder} from '../../store/slices/ordersSlice';
 import {Colors, Spacing, FontSize, BorderRadius} from '../../theme';
 import {OrdemProducao, UserRole} from '../../types';
 
@@ -112,13 +113,17 @@ const cardStyles = StyleSheet.create({
 export const OrdersListScreen: React.FC = () => {
   const dispatch = useAppDispatch();
   const router = useRouter();
-  const {orders} = useAppSelector(s => s.orders);
+  const {orders, isLoading} = useAppSelector(s => s.orders);
   const user = useAppSelector(s => s.auth.user);
   const role = (user?.perfil ?? 'producao') as UserRole;
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('todos');
   const [showFilter, setShowFilter] = useState(false);
+
+  useFocusEffect(useCallback(() => {
+    dispatch(fetchOrders());
+  }, [dispatch]));
 
   const canCreate = ['planeamento', 'direcao'].includes(role);
 
@@ -214,7 +219,9 @@ export const OrdersListScreen: React.FC = () => {
         style={styles.list}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}>
-        {filteredOrders.length === 0 ? (
+        {isLoading ? (
+          <ActivityIndicator color={Colors.primary} style={{marginTop: 40}} />
+        ) : filteredOrders.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyText}>Nenhuma ordem encontrada.</Text>
           </View>

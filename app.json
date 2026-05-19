@@ -30,7 +30,14 @@
     "scheme": "primetool",
     "plugins": [
       "expo-router",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "A app precisa de acesso às fotos para anexar imagens às tarefas de montagem.",
+          "cameraPermission": "A app precisa de acesso à câmara para fotografar a montagem."
+        }
+      ]
     ]
   }
 }

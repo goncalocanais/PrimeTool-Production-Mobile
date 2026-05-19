@@ -65,9 +65,7 @@ export interface Material {
   unidade: string;
   stockAtual: number;
   stockMinimo: number;
-  stockMaximo: number;
   localizacao?: string;
-  fornecedor?: string;
   precoUnitario?: number;
 }
 
@@ -110,31 +108,6 @@ export interface PedidoMaterial {
   respondidoEm?: string;
   observacaoResposta?: string;
   entregueEm?: string;
-}
-
-// ─── Pedidos de Compra ─────────────────────────────────────────────────────────
-export type PedidoCompraStatus =
-  | 'pendente'
-  | 'aprovado'
-  | 'enviado'
-  | 'recepcao_parcial'
-  | 'recebido'
-  | 'cancelado';
-
-export interface PedidoCompra {
-  id: number;
-  referencia: string;
-  fornecedor: string;
-  materialId: number;
-  material?: Material;
-  quantidade: number;
-  quantidadeRecebida: number;
-  precoUnitario: number;
-  status: PedidoCompraStatus;
-  dataPedido: string;
-  dataEntregaPrevista?: string;
-  dataEntregaReal?: string;
-  criadoPor: string;
 }
 
 // ─── Pedidos de Assistência ────────────────────────────────────────────────────
@@ -214,27 +187,6 @@ export interface Expedicao {
   criadoPor: string;
 }
 
-// ─── RH ───────────────────────────────────────────────────────────────────────
-export interface Departamento {
-  id: number;
-  nome: string;
-  responsavel?: string;
-  totalColaboradores: number;
-}
-
-export interface Colaborador {
-  id: number;
-  nome: string;
-  email: string;
-  telefone?: string;
-  cargo: string;
-  departamentoId: number;
-  departamento?: Departamento;
-  perfil: UserRole;
-  dataAdmissao: string;
-  ativo: boolean;
-}
-
 // ─── Progresso de Produção ─────────────────────────────────────────────────────
 export interface RegistoProgresso {
   id: number;
@@ -280,5 +232,4 @@ export interface DashboardKPIs {
   pedidosMaterialPendentes: number;
   alertasStockMinimo: number;
   naoConformidadesAbertas: number;
-  pedidosCompraPendentes: number;
 }

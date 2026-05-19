@@ -1,5 +1,13 @@
 import {supabase} from '../lib/supabase';
 import {Expedicao} from '../types';
+import {notificacoesApi} from './notificacoes';
+
+function toISODate(d?: string): string | undefined {
+  if (!d) return undefined;
+  const parts = d.split('/');
+  if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  return d;
+}
 
 function mapExpedicao(row: any): Expedicao {
   const responsavel = row.responsavel_obj;
@@ -53,6 +61,7 @@ const SELECT_EXPEDICAO = `
 `;
 
 export const expeditionApi = {
+
   async getAll(status?: string): Promise<Expedicao[]> {
     let query = supabase
       .from('expedicao_expedicao')
@@ -77,7 +86,7 @@ export const expeditionApi = {
   },
 
   async create(expData: Partial<Expedicao>): Promise<Expedicao> {
-    const ref = `EXP-${Date.now()}`;
+    const ref = expData.guiaTransporte ? `EXP-${expData.guiaTransporte}` : `EXP-${Date.now()}`;
     const {data, error} = await supabase
       .from('expedicao_expedicao')
       .insert({
@@ -88,9 +97,9 @@ export const expeditionApi = {
         morada_entrega: expData.moradaEntrega ?? '',
         observacoes: expData.observacoes ?? '',
         criado_em: new Date().toISOString(),
-        data_prevista_envio: expData.dataPrevisaoEntrega,
+        data_prevista_envio: toISODate(expData.dataPrevisaoEntrega),
         ordem_id: expData.ordemProducaoId,
-        codigo_at: `AT-${Date.now()}`,
+        codigo_at: `AT-${String(Date.now()).slice(-9)}`,
       })
       .select(SELECT_EXPEDICAO)
       .single();
@@ -124,7 +133,15 @@ export const expeditionApi = {
       .select(SELECT_EXPEDICAO)
       .single();
     if (error) throw error;
-    return mapExpedicao(data);
+    const exp = mapExpedicao(data);
+    const ref = exp.ordemProducao?.referencia ?? exp.referencia;
+    const opId = exp.ordemProducaoId;
+    if (status === 'enviado') {
+      notificacoesApi.create('montagem', 'OP em trânsito', `OP ${ref} a caminho do cliente. Preparar equipa de montagem.`, opId).catch(() => {});
+    } else if (status === 'entregue') {
+      notificacoesApi.create('montagem', 'OP entregue no cliente', `OP ${ref} chegou ao destino. Proceder com a montagem.`, opId).catch(() => {});
+    }
+    return exp;
   },
 
   async registarEnvio(

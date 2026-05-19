@@ -1,5 +1,13 @@
 import {supabase} from '../lib/supabase';
 import {OrdemProducao, OPStatus, PedidoAssistencia, RegistoProgresso} from '../types';
+import {notificacoesApi} from './notificacoes';
+
+function toISODate(d?: string): string | undefined {
+  if (!d) return undefined;
+  const parts = d.split('/');
+  if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  return d;
+}
 
 function nameFromUser(u: any): string {
   if (!u) return '—';
@@ -37,6 +45,31 @@ const SELECT_ORDEM = `
 `;
 
 export const ordersApi = {
+  async getClientes(): Promise<{id: number; nome: string}[]> {
+    const {data, error} = await supabase
+      .from('planeamento_cliente')
+      .select('id, nome')
+      .order('nome', {ascending: true});
+    if (error) throw error;
+    return data ?? [];
+  },
+
+  async getNextReferencia(): Promise<string> {
+    const year = new Date().getFullYear();
+    const {data} = await supabase
+      .from('producao_ordemproducao')
+      .select('referencia')
+      .like('referencia', `${year}-%`)
+      .order('referencia', {ascending: false})
+      .limit(1);
+    if (data && data.length > 0) {
+      const last = (data[0].referencia as string).split('-')[1];
+      const num = parseInt(last, 10);
+      if (!isNaN(num)) return `${year}-${String(num + 1).padStart(4, '0')}`;
+    }
+    return `${year}-0001`;
+  },
+
   async getAll(params: {status?: OPStatus; search?: string} = {}): Promise<OrdemProducao[]> {
     let query = supabase
       .from('producao_ordemproducao')
@@ -63,7 +96,8 @@ export const ordersApi = {
     return mapOrdem(data);
   },
 
-  async create(orderData: Partial<OrdemProducao> & {clienteId?: number}): Promise<OrdemProducao> {
+  async create(orderData: Partial<OrdemProducao> & {clienteId?: number; criadoPorId?: number}): Promise<OrdemProducao> {
+    const hoje = new Date().toISOString();
     const {data, error} = await supabase
       .from('producao_ordemproducao')
       .insert({
@@ -72,17 +106,27 @@ export const ordersApi = {
         descricao: orderData.descricao ?? '',
         estado: orderData.status ?? 'planeamento',
         prioridade: orderData.prioridade ?? 'media',
-        data_prevista_inicio: orderData.dataInicio,
-        data_prevista_fim: orderData.dataFimPrevista,
+        data_prevista_inicio: toISODate(orderData.dataInicio) ?? hoje,
+        data_prevista_fim: toISODate(orderData.dataFimPrevista),
+        data_entrega_prevista: toISODate(orderData.dataFimPrevista),
+        data_planeamento: hoje,
         observacoes: orderData.observacoes ?? '',
-        criado_em: new Date().toISOString(),
-        atualizado_em: new Date().toISOString(),
+        criado_em: hoje,
+        atualizado_em: hoje,
         cliente_id: orderData.clienteId ?? 1,
+        criado_por_id: (orderData.criadoPorId && orderData.criadoPorId > 0) ? orderData.criadoPorId : null,
       })
       .select(SELECT_ORDEM)
       .single();
     if (error) throw error;
-    return mapOrdem(data);
+    const op = mapOrdem(data);
+    notificacoesApi.create(
+      ['producao', 'armazem'],
+      'Nova Ordem de Produção',
+      `OP ${op.referencia} – ${op.descricao} foi criada e aguarda produção.`,
+      op.id,
+    ).catch(() => {});
+    return op;
   },
 
   async update(id: number, orderData: Partial<OrdemProducao>): Promise<OrdemProducao> {
@@ -110,7 +154,13 @@ export const ordersApi = {
       .select(SELECT_ORDEM)
       .single();
     if (error) throw error;
-    return mapOrdem(data);
+    const op = mapOrdem(data);
+    if (status === 'qualidade') {
+      notificacoesApi.create('qualidade', 'Verificação de qualidade pendente', `OP ${op.referencia} – ${op.descricao} concluída. Verificação necessária.`, id).catch(() => {});
+    } else if (status === 'expedicao') {
+      notificacoesApi.create('expedicao', 'OP pronta para expedição', `OP ${op.referencia} – ${op.descricao} aprovada na qualidade. Criar guia de transporte.`, id).catch(() => {});
+    }
+    return op;
   },
 
   async updateProgress(id: number, _progresso: number, descricao: string): Promise<void> {
@@ -195,6 +245,17 @@ export const ordersApi = {
   },
 
   async delete(id: number): Promise<void> {
+    const childDeletes: {table: string; col: string}[] = [
+      {table: 'producao_registoproducao',       col: 'ordem_id'},
+      {table: 'producao_pedidoassistencia',      col: 'ordem_id'},
+      {table: 'producao_pedidomaterialadicional',col: 'ordem_id'},
+      {table: 'montagem_tarefamontagem',         col: 'ordem_id'},
+      {table: 'qualidade_inspeccao',             col: 'ordem_id'},
+    ];
+    for (const {table, col} of childDeletes) {
+      const {error: e} = await supabase.from(table).delete().eq(col, id);
+      if (e) console.warn(`[delete cascade] ${table}:`, e);
+    }
     const {error} = await supabase.from('producao_ordemproducao').delete().eq('id', id);
     if (error) throw error;
   },

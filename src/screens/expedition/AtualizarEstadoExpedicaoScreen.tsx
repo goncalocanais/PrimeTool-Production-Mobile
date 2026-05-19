@@ -1,13 +1,14 @@
 import React, {useState, useEffect, useCallback} from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, ActivityIndicator, RefreshControl,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, ActivityIndicator, RefreshControl, FlatList, Keyboard, Alert,
 } from 'react-native';
 import {useRouter} from 'expo-router';
 import {ChevronDown, Plus, X} from 'lucide-react-native';
 import {useAppSelector} from '../../store';
-import {AppHeader, BottomNavBar} from '../../components/common';
+import {AppHeader, BottomNavBar, DateInput} from '../../components/common';
 import {Colors, Spacing, FontSize, BorderRadius} from '../../theme';
 import {expeditionApi} from '../../api/expedition';
+import {ordersApi} from '../../api/orders';
 import {supabase} from '../../lib/supabase';
 import {Expedicao} from '../../types';
 
@@ -36,9 +37,16 @@ const ESTADOS: ExpedicaoStatus[] = ['pendente','em_preparacao','pronto','enviado
 
 interface Veiculo {id: number; matricula: string; descricao: string;}
 
-function EstadoBadge({estado, onChange}: {estado: string; onChange: (e: ExpedicaoStatus) => void}) {
+function EstadoBadge({estado, onChange, canEdit}: {estado: string; onChange: (e: ExpedicaoStatus) => void; canEdit: boolean}) {
   const [open, setOpen] = useState(false);
   const style = ESTADO_STYLE[estado] ?? {bg: Colors.gray100, text: Colors.gray600};
+  if (!canEdit) {
+    return (
+      <View style={[badgeStyles.badge, {backgroundColor: style.bg}]}>
+        <Text style={[badgeStyles.text, {color: style.text}]}>{ESTADO_LABEL[estado] ?? estado}</Text>
+      </View>
+    );
+  }
   return (
     <View>
       <TouchableOpacity style={[badgeStyles.badge, {backgroundColor: style.bg}]} onPress={() => setOpen(true)} activeOpacity={0.8}>
@@ -79,7 +87,7 @@ const badgeStyles = StyleSheet.create({
   menuText: {fontSize: FontSize.sm, fontFamily: 'Exo2_400Regular'},
 });
 
-function ExpedicaoCard({exp, onEstadoChange}: {exp: Expedicao; onEstadoChange: (id: number, e: ExpedicaoStatus) => void}) {
+function ExpedicaoCard({exp, onEstadoChange, canEdit}: {exp: Expedicao; onEstadoChange: (id: number, e: ExpedicaoStatus) => void; canEdit: boolean}) {
   return (
     <View style={cardStyles.card}>
       <View style={cardStyles.topRow}>
@@ -100,7 +108,7 @@ function ExpedicaoCard({exp, onEstadoChange}: {exp: Expedicao; onEstadoChange: (
           {exp.dataEnvio && (
             <Text style={cardStyles.date}>Enviado: {exp.dataEnvio.split('T')[0].split('-').reverse().join('/')}</Text>
           )}
-          <EstadoBadge estado={exp.status} onChange={e => onEstadoChange(exp.id, e)} />
+          <EstadoBadge estado={exp.status} onChange={e => onEstadoChange(exp.id, e)} canEdit={canEdit} />
         </View>
       </View>
     </View>
@@ -121,12 +129,13 @@ const cardStyles = StyleSheet.create({
   date: {fontSize: 11, color: Colors.gray400, textAlign: 'right'},
 });
 
-const EMPTY_NOVA = {ordemRef: '', morada: '', transportadora: '', guia: '', veiculoId: ''};
+const EMPTY_NOVA = {morada: '', guia: '', veiculoId: '', dataPrevisao: ''};
 
 export const AtualizarEstadoExpedicaoScreen: React.FC = () => {
   const router   = useRouter();
   const user     = useAppSelector(s => s.auth.user);
   const canCreate = ['expedicao', 'direcao'].includes(user?.perfil ?? '');
+  const canEdit   = ['expedicao', 'direcao'].includes(user?.perfil ?? '');
 
   const [expedicoes, setExpedicoes]     = useState<Expedicao[]>([]);
   const [veiculos, setVeiculos]         = useState<Veiculo[]>([]);
@@ -135,6 +144,9 @@ export const AtualizarEstadoExpedicaoScreen: React.FC = () => {
   const [nova, setNova]                 = useState(EMPTY_NOVA);
   const [novaError, setNovaError]       = useState('');
   const [showVeiculoPicker, setShowVeiculoPicker] = useState(false);
+  const [opsExpedicao, setOpsExpedicao] = useState<{id: number; referencia: string; descricao: string}[]>([]);
+  const [selectedOpId, setSelectedOpId] = useState<number | null>(null);
+  const [showOpPicker, setShowOpPicker] = useState(false);
 
   const getDisplayName = () => {
     if (!user) return 'Utilizador';
@@ -163,33 +175,62 @@ export const AtualizarEstadoExpedicaoScreen: React.FC = () => {
   const handleEstadoChange = async (id: number, novoEstado: ExpedicaoStatus) => {
     try {
       await expeditionApi.updateStatus(id, novoEstado);
-      load();
     } catch (e) {
-      console.error('Erro ao atualizar estado:', e);
+      console.error('Erro ao atualizar estado da expedição:', e);
+      Alert.alert('Erro', 'Não foi possível atualizar o estado da expedição.');
+      return;
     }
+    if (novoEstado === 'entregue') {
+      const ordemId = expedicoes.find(e => e.id === id)?.ordemProducaoId;
+      if (ordemId) {
+        try {
+          await ordersApi.updateStatus(ordemId, 'montagem');
+        } catch (e) {
+          console.error('Erro ao transitar OP para montagem:', e);
+        }
+      }
+    }
+    load();
+  };
+
+  const openNova = async () => {
+    try {
+      const all = await ordersApi.getAll();
+      const ops = all.filter(o => o.status === 'expedicao');
+      setOpsExpedicao(ops.map(o => ({id: o.id, referencia: o.referencia, descricao: o.descricao})));
+      if (ops.length > 0) {
+        setSelectedOpId(ops[0].id);
+        setNova(p => ({...p, guia: ops[0].referencia}));
+      }
+    } catch (e) { console.error(e); }
+    setShowNova(true);
   };
 
   const handleCriarGuia = async () => {
-    if (!nova.ordemRef.trim()) {
-      setNovaError('Referência da obra é obrigatória.');
+    if (!selectedOpId) {
+      setNovaError('Selecione uma ordem de produção.');
       return;
     }
+    Keyboard.dismiss();
     try {
       const veiculo = veiculos.find(v => String(v.id) === nova.veiculoId);
       await expeditionApi.create({
-        moradaEntrega:    nova.morada.trim() || '—',
-        transportadora:   veiculo ? `${veiculo.descricao} (${veiculo.matricula})` : nova.transportadora.trim() || '—',
-        guiaTransporte:   nova.guia.trim() || '',
-        observacoes:      '',
-        ordemProducaoId:  0,
+        moradaEntrega:         nova.morada.trim() || '—',
+        transportadora:        veiculo ? `${veiculo.descricao} (${veiculo.matricula})` : '—',
+        guiaTransporte:        nova.guia.trim() || '',
+        observacoes:           '',
+        ordemProducaoId:       selectedOpId,
+        dataPrevisaoEntrega:   nova.dataPrevisao || undefined,
       });
       setNova(EMPTY_NOVA);
+      setSelectedOpId(null);
+      setShowOpPicker(false);
       setNovaError('');
       setShowNova(false);
       load();
     } catch (e) {
       console.error('Erro ao criar guia:', e);
-      setNovaError('Erro ao criar. Verifique a referência da obra.');
+      setNovaError('Erro ao criar guia de transporte.');
     }
   };
 
@@ -205,7 +246,7 @@ export const AtualizarEstadoExpedicaoScreen: React.FC = () => {
       <View style={styles.toolbar}>
         <Text style={styles.sectionTitle}>GUIAS DE TRANSPORTE</Text>
         {canCreate && (
-          <TouchableOpacity style={styles.novaBtn} onPress={() => setShowNova(true)} activeOpacity={0.85}>
+          <TouchableOpacity style={styles.novaBtn} onPress={openNova} activeOpacity={0.85}>
             <Plus size={16} color="#fff" strokeWidth={3} />
             <Text style={styles.novaBtnText}>Nova Guia</Text>
           </TouchableOpacity>
@@ -225,7 +266,7 @@ export const AtualizarEstadoExpedicaoScreen: React.FC = () => {
         )}
 
         {expedicoes.map(exp => (
-          <ExpedicaoCard key={exp.id} exp={exp} onEstadoChange={handleEstadoChange} />
+          <ExpedicaoCard key={exp.id} exp={exp} onEstadoChange={handleEstadoChange} canEdit={canEdit} />
         ))}
 
         {!isLoading && expedicoes.length === 0 && (
@@ -239,60 +280,84 @@ export const AtualizarEstadoExpedicaoScreen: React.FC = () => {
       <BottomNavBar />
 
       {/* Nova Guia modal */}
-      <Modal visible={showNova} transparent animationType="slide" onRequestClose={() => setShowNova(false)}>
-        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setShowNova(false)}>
-          <View style={styles.novaBox} onStartShouldSetResponder={() => true}>
+      <Modal visible={showNova} transparent animationType="slide" hardwareAccelerated onRequestClose={() => { Keyboard.dismiss(); setShowNova(false); }}>
+        <View style={styles.overlay}>
+          <ScrollView style={{width: '100%'}} contentContainerStyle={{flexGrow: 1, justifyContent: 'center', alignItems: 'center'}} keyboardShouldPersistTaps="handled">
+          <View style={styles.novaBox}>
             <View style={styles.novaHeader}>
               <Text style={styles.novaTitle}>Nova Guia de Transporte</Text>
-              <TouchableOpacity onPress={() => setShowNova(false)}>
+              <TouchableOpacity onPress={() => { Keyboard.dismiss(); setShowNova(false); }}>
                 <X size={20} color={Colors.gray500} />
               </TouchableOpacity>
             </View>
 
-            {([
-              {label: 'REFERÊNCIA DA OBRA *', key: 'ordemRef',      placeholder: 'Ex: 2026-0005'},
-              {label: 'MORADA DE ENTREGA',    key: 'morada',        placeholder: 'Rua, nº, localidade'},
-              {label: 'TRANSPORTADORA',       key: 'transportadora',placeholder: 'Nome da transportadora'},
-              {label: 'GUIA DE TRANSPORTE',   key: 'guia',          placeholder: 'Nº da guia'},
-            ] as {label: string; key: string; placeholder: string}[]).map(f => (
-              <View key={f.key} style={styles.novaField}>
-                <Text style={styles.novaLabel}>{f.label}</Text>
-                <TextInput
-                  style={styles.novaInput}
-                  placeholder={f.placeholder}
-                  placeholderTextColor={Colors.gray400}
-                  value={(nova as any)[f.key]}
-                  onChangeText={v => {setNova(p => ({...p, [f.key]: v})); setNovaError('');}}
-                />
+            <View style={styles.novaField}>
+              <Text style={styles.novaLabel}>ORDEM DE PRODUÇÃO *</Text>
+              {opsExpedicao.length === 0 ? (
+                <View style={styles.emptyOps}>
+                  <Text style={styles.emptyOpsText}>Nenhuma OP pronta para expedição.</Text>
+                </View>
+              ) : (
+                <>
+                  <TouchableOpacity style={styles.novaInput} onPress={() => setShowOpPicker(true)} activeOpacity={0.85}>
+                    <Text style={{fontSize: FontSize.sm, color: selectedOpId ? Colors.gray900 : Colors.gray400, fontFamily: 'Exo2_400Regular'}}>
+                      {opsExpedicao.find(o => o.id === selectedOpId)?.referencia || 'Selecionar OP'} ▾
+                    </Text>
+                  </TouchableOpacity>
+                  {selectedOpId && (
+                    <Text style={styles.opDescricao}>{opsExpedicao.find(o => o.id === selectedOpId)?.descricao}</Text>
+                  )}
+                </>
+              )}
+            </View>
+
+            <View style={styles.novaField}>
+              <Text style={styles.novaLabel}>GUIA DE TRANSPORTE</Text>
+              <View style={styles.readonlyField}>
+                <Text style={styles.readonlyText}>EXP-{nova.guia}</Text>
               </View>
-            ))}
+            </View>
+
+            <View style={styles.novaField}>
+              <Text style={styles.novaLabel}>MORADA DE ENTREGA</Text>
+              <TextInput
+                style={styles.novaInput}
+                placeholder="Rua, nº, localidade"
+                placeholderTextColor={Colors.gray400}
+                value={nova.morada}
+                onChangeText={v => setNova(p => ({...p, morada: v}))}
+              />
+            </View>
+
+            <View style={styles.novaField}>
+              <Text style={styles.novaLabel}>DATA PREVISÃO ENTREGA</Text>
+              <DateInput
+                style={styles.novaInput}
+                value={nova.dataPrevisao}
+                onChangeText={v => setNova(p => ({...p, dataPrevisao: v}))}
+              />
+            </View>
 
             {veiculos.length > 0 && (
-              <View style={[styles.novaField, {zIndex: 999}]}>
+              <View style={styles.novaField}>
                 <Text style={styles.novaLabel}>VEÍCULO</Text>
-                <TouchableOpacity
-                  style={styles.veiculoPickerBtn}
-                  onPress={() => setShowVeiculoPicker(p => !p)}
-                  activeOpacity={0.85}>
-                  <Text style={[styles.veiculoPickerText, !nova.veiculoId && {color: Colors.gray400}]}>
-                    {nova.veiculoId
-                      ? (() => { const v = veiculos.find(v => String(v.id) === nova.veiculoId); return v ? `${v.descricao} (${v.matricula})` : ''; })()
-                      : 'Selecionar veículo'} ▾
+                <TouchableOpacity style={styles.novaInput} onPress={() => setShowVeiculoPicker(p => !p)} activeOpacity={0.85}>
+                  <Text style={{fontSize: FontSize.sm, color: nova.veiculoId ? Colors.gray900 : Colors.gray400, fontFamily: 'Exo2_400Regular'}}>
+                    {(() => { const v = veiculos.find(v => String(v.id) === nova.veiculoId); return v ? `${v.descricao} (${v.matricula})` : 'Selecionar veículo'; })()} ▾
                   </Text>
                 </TouchableOpacity>
                 {showVeiculoPicker && (
-                  <View style={styles.veiculoDropdown}>
-                    <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-                      {veiculos.map(v => (
-                        <TouchableOpacity
-                          key={v.id}
-                          style={styles.veiculoItem}
-                          onPress={() => {setNova(p => ({...p, veiculoId: String(v.id)})); setShowVeiculoPicker(false);}}
-                          activeOpacity={0.85}>
-                          <Text style={styles.veiculoItemNome}>{v.descricao} ({v.matricula})</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
+                  <View style={styles.inlineList}>
+                    {veiculos.map(v => (
+                      <TouchableOpacity
+                        key={v.id}
+                        style={[styles.inlineItem, String(v.id) === nova.veiculoId && styles.inlineItemActive]}
+                        onPress={() => { setNova(p => ({...p, veiculoId: String(v.id)})); setShowVeiculoPicker(false); }}
+                        activeOpacity={0.85}>
+                        <Text style={[styles.inlineItemText, String(v.id) === nova.veiculoId && {color: NAVY, fontFamily: 'Exo2_700Bold'}]}>{v.descricao}</Text>
+                        <Text style={styles.pickerItemDesc}>{v.matricula}</Text>
+                      </TouchableOpacity>
+                    ))}
                   </View>
                 )}
               </View>
@@ -304,8 +369,30 @@ export const AtualizarEstadoExpedicaoScreen: React.FC = () => {
               <Text style={styles.novaSaveBtnText}>CRIAR GUIA</Text>
             </TouchableOpacity>
           </View>
+          </ScrollView>
+        </View>
+      </Modal>
+      {/* OP e Veículo pickers — depois do Nova Guia modal para ficarem por cima */}
+      <Modal visible={showOpPicker} transparent animationType="fade" onRequestClose={() => setShowOpPicker(false)}>
+        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setShowOpPicker(false)}>
+          <View style={[styles.pickerBox, {maxHeight: 350}]} onStartShouldSetResponder={() => true}>
+            <Text style={styles.pickerTitle}>OPs prontas para expedição</Text>
+            <FlatList
+              data={opsExpedicao}
+              keyExtractor={o => String(o.id)}
+              renderItem={({item}) => (
+                <TouchableOpacity
+                  style={[styles.pickerItem, item.id === selectedOpId && styles.pickerItemActive]}
+                  onPress={() => { setSelectedOpId(item.id); setNova(p => ({...p, guia: item.referencia})); setShowOpPicker(false); }}>
+                  <Text style={[styles.pickerItemRef, item.id === selectedOpId && {color: NAVY, fontFamily: 'Exo2_700Bold'}]}>{item.referencia}</Text>
+                  <Text style={styles.pickerItemDesc}>{item.descricao}</Text>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
         </TouchableOpacity>
       </Modal>
+
     </View>
   );
 };
@@ -329,9 +416,19 @@ const styles = StyleSheet.create({
   errorText: {fontSize: 12, color: Colors.danger, fontFamily: 'Exo2_400Regular', marginBottom: Spacing.sm},
   novaSaveBtn: {backgroundColor: ORANGE, borderRadius: BorderRadius.full, paddingVertical: 12, alignItems: 'center', marginTop: Spacing.sm},
   novaSaveBtnText: {color: '#fff', fontFamily: 'Exo2_700Bold', fontSize: FontSize.sm, letterSpacing: 1},
-  veiculoPickerBtn: {borderWidth: 1.5, borderColor: Colors.border, borderRadius: 8, padding: Spacing.sm + 2, backgroundColor: '#fff'},
-  veiculoPickerText: {fontSize: FontSize.sm, color: Colors.gray900, fontFamily: 'Exo2_400Regular'},
-  veiculoDropdown: {position: 'absolute', top: 60, left: 0, right: 0, maxHeight: 200, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: Colors.border, zIndex: 999, elevation: 8, shadowColor: '#000', shadowOffset: {width: 0, height: 2}, shadowOpacity: 0.15, shadowRadius: 6, overflow: 'hidden'},
-  veiculoItem: {paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm},
-  veiculoItemNome: {fontSize: FontSize.sm, color: Colors.gray700, fontFamily: 'Exo2_400Regular'},
+  pickerBox: {backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden', width: '90%', shadowColor: '#000', shadowOffset: {width: 0, height: 4}, shadowOpacity: 0.12, shadowRadius: 16, elevation: 8},
+  pickerTitle: {fontSize: 11, fontFamily: 'Exo2_700Bold', color: NAVY, padding: Spacing.md, borderBottomWidth: 1, borderBottomColor: Colors.border},
+  pickerItem: {padding: Spacing.md, borderBottomWidth: 1, borderBottomColor: Colors.gray50},
+  pickerItemActive: {backgroundColor: '#f0f4ff'},
+  pickerItemRef: {fontSize: FontSize.sm, fontFamily: 'Exo2_400Regular', color: Colors.gray700},
+  pickerItemDesc: {fontSize: 10, color: Colors.gray400, fontFamily: 'Exo2_400Regular', marginTop: 1},
+  emptyOps: {padding: Spacing.md, backgroundColor: Colors.gray50, borderRadius: 8, borderWidth: 1, borderColor: Colors.border},
+  emptyOpsText: {fontSize: FontSize.sm, color: Colors.gray500, fontFamily: 'Exo2_400Regular', textAlign: 'center'},
+  opDescricao: {fontSize: 11, color: Colors.gray500, fontFamily: 'Exo2_400Regular', marginTop: 4, paddingLeft: 2},
+  readonlyField: {borderWidth: 1.5, borderColor: Colors.border, borderRadius: 8, padding: Spacing.sm + 2, backgroundColor: Colors.gray50},
+  readonlyText: {fontSize: FontSize.sm, color: Colors.gray600, fontFamily: 'Exo2_700Bold'},
+  inlineList: {marginTop: 4, borderWidth: 1, borderColor: Colors.border, borderRadius: 8, overflow: 'hidden', backgroundColor: '#fff'},
+  inlineItem: {paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.gray50},
+  inlineItemActive: {backgroundColor: '#f0f4ff'},
+  inlineItemText: {fontSize: FontSize.sm, fontFamily: 'Exo2_400Regular', color: Colors.gray700},
 });

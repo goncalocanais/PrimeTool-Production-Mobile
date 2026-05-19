@@ -32,7 +32,9 @@ const MaterialCard: React.FC<{material: Material; onPress: () => void}> = ({mate
           style={[
             styles.stockFill,
             {
-              width: `${Math.min(100, (material.stockAtual / material.stockMaximo) * 100)}%`,
+              width: material.stockMinimo > 0
+                ? `${Math.min(100, (material.stockAtual / (material.stockMinimo * 4)) * 100)}%`
+                : '100%',
               backgroundColor: isOut ? Colors.danger : isLow ? Colors.warning : Colors.success,
             },
           ]}
@@ -119,11 +121,6 @@ export const MaterialsListScreen: React.FC = () => {
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity
-          style={styles.filterBtn}
-          onPress={() => navigation.navigate('PedidosCompraList')}>
-          <Text style={styles.filterBtnText}>🛒 Compras</Text>
-        </TouchableOpacity>
       </View>
 
       <FlatList

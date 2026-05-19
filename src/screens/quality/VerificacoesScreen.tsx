@@ -1,11 +1,12 @@
 import React, {useState, useEffect, useCallback} from 'react';
-import {View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, RefreshControl, ActivityIndicator} from 'react-native';
+import {View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, FlatList, RefreshControl, ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform} from 'react-native';
 import {useRouter} from 'expo-router';
 import {Search, ChevronDown, Plus, X} from 'lucide-react-native';
 import {useAppSelector} from '../../store';
 import {AppHeader, BottomNavBar} from '../../components/common';
 import {Colors, Spacing, FontSize, BorderRadius} from '../../theme';
 import {qualityApi} from '../../api/quality';
+import {ordersApi} from '../../api/orders';
 import {InspeccaoQualidade} from '../../types';
 import {supabase} from '../../lib/supabase';
 
@@ -39,6 +40,9 @@ export const VerificacoesScreen: React.FC = () => {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [showNova, setShowNova] = useState(false);
   const [nova, setNova] = useState({ordemRef: '', tipo: '', observacoes: '', resultado: 'aprovado'});
+  const [opsQualidade, setOpsQualidade] = useState<{id: number; referencia: string; descricao: string}[]>([]);
+  const [selectedOpId, setSelectedOpId] = useState<number | null>(null);
+  const [showOpPicker, setShowOpPicker] = useState(false);
 
   const getDisplayName = () => {
     if (!user) return 'Utilizador';
@@ -71,22 +75,32 @@ export const VerificacoesScreen: React.FC = () => {
     return matchFilter && matchSearch;
   });
 
-  const handleAdd = async () => {
-    if (!nova.ordemRef.trim()) return;
+  const openNova = async () => {
     try {
-      const {data: orderData} = await supabase
-        .from('producao_ordemproducao')
-        .select('id')
-        .eq('referencia', nova.ordemRef.trim())
-        .single();
+      const ops = await ordersApi.getAll({status: 'qualidade'});
+      setOpsQualidade(ops.map(o => ({id: o.id, referencia: o.referencia, descricao: o.descricao})));
+      if (ops.length > 0) { setSelectedOpId(ops[0].id); setNova(p => ({...p, ordemRef: ops[0].referencia})); }
+    } catch (e) { console.error(e); }
+    setShowNova(true);
+  };
+
+  const handleAdd = async () => {
+    if (!selectedOpId) return;
+    Keyboard.dismiss();
+    try {
       const tipoDb = nova.tipo.toLowerCase().includes('interm') ? 'intermedia' : 'final';
       await qualityApi.create({
-        ordemProducaoId: orderData?.id,
+        ordemProducaoId: selectedOpId,
         tipo: tipoDb as any,
         resultado: nova.resultado as any,
         observacoes: nova.observacoes || undefined,
       });
+      if (nova.resultado === 'aprovado' || nova.resultado === 'aprovado_com_ressalvas') {
+        await ordersApi.updateStatus(selectedOpId, 'expedicao');
+      }
       setNova({ordemRef: '', tipo: '', observacoes: '', resultado: 'aprovado'});
+      setSelectedOpId(null);
+      setShowOpPicker(false);
       setShowNova(false);
       load();
     } catch (e) {
@@ -98,7 +112,6 @@ export const VerificacoesScreen: React.FC = () => {
     <View style={styles.container}>
       <AppHeader
         section="QUALIDADE"
-
         userName={getDisplayName()}
         onUserPress={() => router.push('/(tabs)/profile')}
         onLogoPress={() => router.push('/(tabs)')}
@@ -130,7 +143,7 @@ export const VerificacoesScreen: React.FC = () => {
           <ChevronDown size={12} color={NAVY} />
         </TouchableOpacity>
         {canEdit && (
-          <TouchableOpacity style={styles.novaBtn} onPress={() => setShowNova(true)} activeOpacity={0.85}>
+          <TouchableOpacity style={styles.novaBtn} onPress={openNova} activeOpacity={0.85}>
             <Plus size={16} color="#fff" strokeWidth={3} />
           </TouchableOpacity>
         )}
@@ -204,18 +217,60 @@ export const VerificacoesScreen: React.FC = () => {
 
       <BottomNavBar />
 
+      {/* OP picker modal */}
+      <Modal visible={showOpPicker} transparent animationType="fade" onRequestClose={() => setShowOpPicker(false)}>
+        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setShowOpPicker(false)}>
+          <View style={styles.opPickerBox} onStartShouldSetResponder={() => true}>
+            <Text style={styles.opPickerTitle}>OPs em Qualidade</Text>
+            <FlatList
+              data={opsQualidade}
+              keyExtractor={o => String(o.id)}
+              style={styles.opPickerList}
+              nestedScrollEnabled
+              renderItem={({item}) => (
+                <TouchableOpacity
+                  style={[styles.filterItem, item.id === selectedOpId && styles.filterItemActive]}
+                  onPress={() => {setSelectedOpId(item.id); setNova(p => ({...p, ordemRef: item.referencia})); setShowOpPicker(false);}}>
+                  <Text style={[styles.filterItemText, item.id === selectedOpId && styles.filterItemTextActive]}>{item.referencia}</Text>
+                  <Text style={{fontSize: 10, color: Colors.gray400, fontFamily: 'Exo2_400Regular'}}>{item.descricao}</Text>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Nova verificação modal */}
-      <Modal visible={canEdit && showNova} transparent animationType="slide" onRequestClose={() => setShowNova(false)}>
-        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setShowNova(false)}>
-          <View style={styles.modalBox} onStartShouldSetResponder={() => true}>
+      <Modal visible={canEdit && showNova} transparent animationType="slide" hardwareAccelerated onRequestClose={() => { Keyboard.dismiss(); setShowNova(false); }}>
+        <KeyboardAvoidingView style={{flex: 1}} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView contentContainerStyle={styles.overlay} keyboardShouldPersistTaps="handled">
+          <View style={styles.modalBox}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Registar Verificação</Text>
-              <TouchableOpacity onPress={() => setShowNova(false)}><X size={20} color={Colors.gray500} /></TouchableOpacity>
+              <TouchableOpacity onPress={() => { Keyboard.dismiss(); setShowNova(false); }}><X size={20} color={Colors.gray500} /></TouchableOpacity>
+            </View>
+            <View style={styles.modalField}>
+              <Text style={styles.modalLabel}>ORDEM DE PRODUÇÃO *</Text>
+              {opsQualidade.length === 0 ? (
+                <View style={styles.emptyOps}>
+                  <Text style={styles.emptyOpsText}>Nenhuma OP aguarda verificação de qualidade.</Text>
+                </View>
+              ) : (
+                <>
+                  <TouchableOpacity style={styles.modalInput} onPress={() => setShowOpPicker(true)} activeOpacity={0.85}>
+                    <Text style={{fontSize: FontSize.sm, color: selectedOpId ? Colors.gray900 : Colors.gray400}}>
+                      {opsQualidade.find(o => o.id === selectedOpId)?.referencia || 'Selecionar OP'} ▾
+                    </Text>
+                  </TouchableOpacity>
+                  {selectedOpId && (
+                    <Text style={styles.opDescricao}>{opsQualidade.find(o => o.id === selectedOpId)?.descricao}</Text>
+                  )}
+                </>
+              )}
             </View>
             {([
-              {label: 'REFERÊNCIA DA OP *', key: 'ordemRef',    placeholder: '2026-0001'},
-              {label: 'TIPO DE INSPEÇÃO',   key: 'tipo',         placeholder: 'Ex: Inspeção Final'},
-              {label: 'OBSERVAÇÕES',        key: 'observacoes',  placeholder: 'Observações...'},
+              {label: 'TIPO DE INSPEÇÃO', key: 'tipo',        placeholder: 'Ex: Inspeção Final'},
+              {label: 'OBSERVAÇÕES',      key: 'observacoes', placeholder: 'Observações...'},
             ] as {label: string; key: string; placeholder: string}[]).map(f => (
               <View key={f.key} style={styles.modalField}>
                 <Text style={styles.modalLabel}>{f.label}</Text>
@@ -226,6 +281,8 @@ export const VerificacoesScreen: React.FC = () => {
                   value={(nova as any)[f.key]}
                   onChangeText={v => setNova(p => ({...p, [f.key]: v}))}
                   multiline={f.key === 'observacoes'}
+                  returnKeyType={f.key === 'observacoes' ? 'done' : 'next'}
+                  blurOnSubmit={f.key === 'observacoes'}
                 />
               </View>
             ))}
@@ -247,7 +304,8 @@ export const VerificacoesScreen: React.FC = () => {
               <Text style={styles.modalSaveBtnText}>REGISTAR</Text>
             </TouchableOpacity>
           </View>
-        </TouchableOpacity>
+        </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -309,4 +367,11 @@ const styles = StyleSheet.create({
   resultOptionText: {fontSize: 10, fontFamily: 'Exo2_700Bold', color: Colors.gray500},
   modalSaveBtn: {backgroundColor: ORANGE, borderRadius: BorderRadius.full, paddingVertical: 12, alignItems: 'center', marginTop: Spacing.sm},
   modalSaveBtnText: {color: '#fff', fontFamily: 'Exo2_700Bold', fontSize: FontSize.sm, letterSpacing: 1},
+  opPickerBox: {backgroundColor: '#fff', borderRadius: 12, width: 300, maxHeight: 380, shadowColor: '#000', shadowOffset: {width: 0, height: 4}, shadowOpacity: 0.12, shadowRadius: 16, elevation: 8},
+  opPickerTitle: {padding: Spacing.md, fontFamily: 'Exo2_700Bold', fontSize: FontSize.sm, color: NAVY, borderBottomWidth: 1, borderBottomColor: Colors.border},
+  opPickerList: {maxHeight: 320},
+
+  emptyOps: {padding: Spacing.md, backgroundColor: Colors.gray50, borderRadius: 8, borderWidth: 1, borderColor: Colors.border},
+  emptyOpsText: {fontSize: FontSize.sm, color: Colors.gray500, fontFamily: 'Exo2_400Regular', textAlign: 'center'},
+  opDescricao: {fontSize: 11, color: Colors.gray500, fontFamily: 'Exo2_400Regular', marginTop: 4, paddingLeft: 2},
 });

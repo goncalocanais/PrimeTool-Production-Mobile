@@ -1,5 +1,6 @@
 import {supabase} from '../lib/supabase';
-import {Material, PedidoMaterial, PedidoCompra, MovimentoStock} from '../types';
+import {Material, PedidoMaterial, MovimentoStock} from '../types';
+import {notificacoesApi} from './notificacoes';
 
 function mapMaterial(row: any): Material {
   return {
@@ -11,9 +12,7 @@ function mapMaterial(row: any): Material {
     unidade: row.unidade,
     stockAtual: Number(row.stock_atual),
     stockMinimo: Number(row.stock_minimo),
-    stockMaximo: Number(row.stock_minimo) * 3,
     localizacao: row.localizacao || undefined,
-    fornecedor: row.fornecedor_obj?.nome ?? undefined,
     precoUnitario: undefined,
   };
 }
@@ -25,8 +24,7 @@ export const materialsApi = {
       .select(`
         id, referencia, nome, descricao, unidade,
         stock_atual, stock_minimo, localizacao, ativo,
-        categoria_obj:armazem_categoria!categoria_id(id, nome),
-        fornecedor_obj:planeamento_cliente!fornecedor_id(id, nome)
+        categoria_obj:armazem_categoria!categoria_id(id, nome)
       `)
       .eq('ativo', true)
       .order('nome');
@@ -46,8 +44,7 @@ export const materialsApi = {
       .select(`
         id, referencia, nome, descricao, unidade,
         stock_atual, stock_minimo, localizacao, ativo,
-        categoria_obj:armazem_categoria!categoria_id(id, nome),
-        fornecedor_obj:planeamento_cliente!fornecedor_id(id, nome)
+        categoria_obj:armazem_categoria!categoria_id(id, nome)
       `)
       .eq('id', id)
       .single();
@@ -61,8 +58,7 @@ export const materialsApi = {
       .select(`
         id, referencia, nome, descricao, unidade,
         stock_atual, stock_minimo, localizacao, ativo,
-        categoria_obj:armazem_categoria!categoria_id(id, nome),
-        fornecedor_obj:planeamento_cliente!fornecedor_id(id, nome)
+        categoria_obj:armazem_categoria!categoria_id(id, nome)
       `)
       .eq('ativo', true)
       .filter('stock_atual', 'lte', 'stock_minimo');
@@ -145,6 +141,53 @@ export const materialsApi = {
       utilizador: '—',
       data: data.data,
     };
+  },
+
+  // Verifica stock disponível sem alterar nada.
+  async getStockByName(materialName: string): Promise<{materialId: number | null; available: number; nome: string}> {
+    const {data} = await supabase
+      .from('armazem_material')
+      .select('id, stock_atual, nome')
+      .ilike('nome', materialName)
+      .eq('ativo', true)
+      .limit(1)
+      .maybeSingle();
+    if (!data) return {materialId: null, available: 0, nome: materialName};
+    return {materialId: data.id, available: Number(data.stock_atual), nome: data.nome};
+  },
+
+  // Deduz stock — só deve ser chamado depois de confirmar que stock é suficiente.
+  // Após dedução, verifica se ficou abaixo do mínimo e notifica armazém.
+  async deductByName(materialId: number, quantidade: number, opReferencia: string): Promise<void> {
+    const {data: mat} = await supabase
+      .from('armazem_material')
+      .select('stock_atual, stock_minimo, nome')
+      .eq('id', materialId)
+      .single();
+    if (!mat) return;
+    const anterior = Number(mat.stock_atual);
+    const posterior = anterior - quantidade;
+    await supabase.from('armazem_movimentostock').insert({
+      tipo: 'saida',
+      quantidade,
+      quantidade_anterior: anterior,
+      quantidade_posterior: posterior,
+      motivo: `OP ${opReferencia}`,
+      referencia_doc: opReferencia,
+      data: new Date().toISOString(),
+      material_id: materialId,
+    });
+    await supabase.from('armazem_material').update({stock_atual: posterior}).eq('id', materialId);
+
+    // Notificar armazém se stock ficou abaixo do mínimo
+    const minimo = Number(mat.stock_minimo);
+    if (minimo > 0 && posterior < minimo) {
+      notificacoesApi.create(
+        'armazem',
+        'Stock baixo — repor material',
+        `${mat.nome}: stock atual ${posterior}, mínimo ${minimo}. Reposição necessária.`,
+      ).catch(() => {});
+    }
   },
 
   async getPedidosMaterial(status?: string): Promise<PedidoMaterial[]> {
@@ -243,84 +286,6 @@ export const materialsApi = {
     if (error) throw error;
   },
 
-  async getPedidosCompra(status?: string): Promise<PedidoCompra[]> {
-    let query = supabase
-      .from('armazem_pedidocompra')
-      .select(`
-        id, referencia, fornecedor, estado, data_pedido,
-        data_entrega_prevista, data_entrega_real, observacoes, criado_em,
-        criado_por_obj:core_user!criado_por_id(first_name, last_name),
-        itens:armazem_itempedidocompra(id, quantidade, qty_recebida, material_id)
-      `)
-      .order('data_pedido', {ascending: false});
-
-    if (status) query = query.eq('estado', status);
-
-    const {data, error} = await query;
-    if (error) throw error;
-    return (data ?? []).map((row: any) => {
-      const item = row.itens?.[0];
-      const criador = row.criado_por_obj;
-      return {
-        id: row.id,
-        referencia: row.referencia,
-        fornecedor: row.fornecedor,
-        materialId: item?.material_id ?? 0,
-        quantidade: item ? Number(item.quantidade) : 0,
-        quantidadeRecebida: item ? Number(item.qty_recebida) : 0,
-        precoUnitario: 0,
-        status: row.estado as any,
-        dataPedido: row.data_pedido,
-        dataEntregaPrevista: row.data_entrega_prevista ?? undefined,
-        dataEntregaReal: row.data_entrega_real ?? undefined,
-        criadoPor: criador
-          ? `${criador.first_name} ${criador.last_name}`.trim()
-          : '—',
-      };
-    });
-  },
-
-  async createPedidoCompra(pedido: Partial<PedidoCompra>): Promise<PedidoCompra> {
-    const ref = `PC-${Date.now()}`;
-    const {data, error} = await supabase
-      .from('armazem_pedidocompra')
-      .insert({
-        referencia: ref,
-        fornecedor: pedido.fornecedor ?? '',
-        estado: 'pendente',
-        data_pedido: new Date().toISOString().split('T')[0],
-        data_entrega_prevista: pedido.dataEntregaPrevista,
-        observacoes: '',
-        criado_em: new Date().toISOString(),
-      })
-      .select()
-      .single();
-    if (error) throw error;
-
-    if (pedido.materialId) {
-      await supabase.from('armazem_itempedidocompra').insert({
-        pedido_id: data.id,
-        material_id: pedido.materialId,
-        quantidade: pedido.quantidade ?? 0,
-        qty_recebida: 0,
-      });
-    }
-
-    return {
-      id: data.id,
-      referencia: data.referencia,
-      fornecedor: data.fornecedor,
-      materialId: pedido.materialId ?? 0,
-      quantidade: pedido.quantidade ?? 0,
-      quantidadeRecebida: 0,
-      precoUnitario: 0,
-      status: data.estado,
-      dataPedido: data.data_pedido,
-      dataEntregaPrevista: pedido.dataEntregaPrevista,
-      criadoPor: '—',
-    };
-  },
-
   async createMaterial(mat: {codigo: string; nome: string; unidade: string; stockMinimo: number; localizacao: string}): Promise<Material> {
     const {data, error} = await supabase
       .from('armazem_material')
@@ -335,36 +300,10 @@ export const materialsApi = {
         ativo: true,
       })
       .select(`id, referencia, nome, descricao, unidade, stock_atual, stock_minimo, localizacao, ativo,
-        categoria_obj:armazem_categoria!categoria_id(id, nome),
-        fornecedor_obj:planeamento_cliente!fornecedor_id(id, nome)`)
+        categoria_obj:armazem_categoria!categoria_id(id, nome)`)
       .single();
     if (error) throw error;
     return mapMaterial(data);
   },
 
-  async registarRecepcao(id: number, quantidadeRecebida: number, _total: number): Promise<void> {
-    const {data: pedido, error: pedErr} = await supabase
-      .from('armazem_pedidocompra')
-      .select('itens:armazem_itempedidocompra(id, quantidade, qty_recebida)')
-      .eq('id', id)
-      .single();
-    if (pedErr) throw pedErr;
-
-    const item = pedido.itens?.[0];
-    if (item) {
-      const novaQty = Number(item.qty_recebida) + quantidadeRecebida;
-      const total = Number(item.quantidade);
-      const estado = novaQty >= total ? 'recebido' : 'recepcao_parcial';
-
-      await supabase
-        .from('armazem_itempedidocompra')
-        .update({qty_recebida: novaQty})
-        .eq('id', item.id);
-
-      await supabase
-        .from('armazem_pedidocompra')
-        .update({estado, data_entrega_real: new Date().toISOString().split('T')[0]})
-        .eq('id', id);
-    }
-  },
 };
